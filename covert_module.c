@@ -125,10 +125,6 @@ static int __init mod_init(void) {
 }
 
 static void __exit mod_exit(void) {
-    if (svc->thread != NULL) {
-        kthread_stop(svc->thread);
-        printk(KERN_ALERT "listen thread stop\n");
-    }
     if (svc->listen_socket != NULL) {
         kernel_sock_shutdown(svc->listen_socket, SHUT_RDWR);
         sock_release(svc->listen_socket);
