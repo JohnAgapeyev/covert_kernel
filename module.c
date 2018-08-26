@@ -5,7 +5,7 @@
 #include <linux/slab.h>
 #include <net/sock.h>
 
-#define PORT 2325
+#define PORT 666
 
 struct service {
     struct socket* listen_socket;
@@ -62,12 +62,14 @@ int send_msg(struct socket* sock, char* buf, int len) {
 
 int start_listen(void) {
     struct socket* acsock;
-    int error, i, size;
+    int error;
+    int i;
+    int size;
     struct sockaddr_in sin;
     int len = 15;
     unsigned char buf[len + 1];
 
-    error = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &svc->listen_socket);
+    error = sock_create_lite(PF_INET, SOCK_STREAM, IPPROTO_TCP, &svc->listen_socket);
     if (error < 0) {
         printk(KERN_ERR "cannot create socket\n");
         return -1;
@@ -90,7 +92,7 @@ int start_listen(void) {
     }
 
     i = 0;
-    while (1) {
+    while (!kthread_should_stop()) {
         error = kernel_accept(svc->listen_socket, &acsock, 0);
         if (error < 0) {
             printk(KERN_ERR "cannot accept socket\n");
@@ -99,7 +101,7 @@ int start_listen(void) {
         printk(KERN_ERR "sock %d accepted\n", i++);
 
         memset(&buf, 0, len + 1);
-        while ((size = recv_msg(acsock, buf, len)) > 0) {
+        while (!kthread_should_stop() && (size = recv_msg(acsock, buf, len)) > 0) {
             send_msg(acsock, buf, size);
             memset(&buf, 0, len + 1);
         }
@@ -112,8 +114,8 @@ int start_listen(void) {
 
 static int __init mod_init(void) {
     svc = kmalloc(sizeof(struct service), GFP_KERNEL);
-    svc->thread = kthread_run((void*) start_listen, NULL, "echo-serv");
-    printk(KERN_ALERT "echo-serv module loaded\n");
+    svc->thread = kthread_run((void*) start_listen, NULL, "packet_send");
+    printk(KERN_ALERT "covert_kernel module loaded\n");
 
     return 0;
 }
@@ -126,7 +128,7 @@ static void __exit mod_exit(void) {
     }
 
     kfree(svc);
-    printk(KERN_ALERT "removed echo-serv module\n");
+    printk(KERN_ALERT "removed covert_kernel module\n");
 }
 
 module_init(mod_init);
