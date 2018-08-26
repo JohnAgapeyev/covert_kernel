@@ -69,7 +69,7 @@ int start_listen(void) {
     int len = 15;
     unsigned char buf[len + 1];
 
-    error = sock_create_lite(PF_INET, SOCK_STREAM, IPPROTO_TCP, &svc->listen_socket);
+    error = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &svc->listen_socket);
     if (error < 0) {
         printk(KERN_ERR "cannot create socket\n");
         return -1;
@@ -78,6 +78,10 @@ int start_listen(void) {
     sin.sin_addr.s_addr = htonl(INADDR_ANY);
     sin.sin_family = AF_INET;
     sin.sin_port = htons(PORT);
+
+    printk(KERN_ALERT "Finding null svc %p\n", (void *) svc);
+    printk(KERN_ALERT "Finding null socket %p\n", (void *) svc->listen_socket);
+    printk(KERN_ALERT "Finding null sin %p\n", (void *) &sin);
 
     error = kernel_bind(svc->listen_socket, (struct sockaddr*) &sin, sizeof(sin));
     if (error < 0) {
@@ -121,6 +125,10 @@ static int __init mod_init(void) {
 }
 
 static void __exit mod_exit(void) {
+    if (svc->thread != NULL) {
+        kthread_stop(svc->thread);
+        printk(KERN_ALERT "listen thread stop\n");
+    }
     if (svc->listen_socket != NULL) {
         kernel_sock_shutdown(svc->listen_socket, SHUT_RDWR);
         sock_release(svc->listen_socket);
