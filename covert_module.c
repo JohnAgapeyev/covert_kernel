@@ -85,10 +85,6 @@ int start_listen(void) {
     sin.sin_family = AF_INET;
     sin.sin_port = htons(PORT);
 
-    printk(KERN_ALERT "Finding null svc %p\n", (void*) svc);
-    printk(KERN_ALERT "Finding null socket %p\n", (void*) svc->listen_socket);
-    printk(KERN_ALERT "Finding null sin %p\n", (void*) &sin);
-
     error = kernel_bind(svc->listen_socket, (struct sockaddr*) &sin, sizeof(sin));
     if (error < 0) {
         printk(KERN_ERR "cannot bind socket, error code: %d\n", error);
@@ -126,11 +122,49 @@ unsigned int hook_func(void* priv, struct sk_buff* skb, const struct nf_hook_sta
     struct iphdr* ip_header = (struct iphdr*) skb_network_header(skb);
     struct tcphdr* tcp_header;
     unsigned char *packet_data;
+    unsigned char *timestamps = NULL;
+    int i;
     if (ip_header->protocol == 6) {
         tcp_header = (struct tcphdr*) skb_transport_header(skb);
         packet_data = skb->data + (ip_header->ihl * 4) + (tcp_header->doff * 4);
 
         if (ntohs(tcp_header->source) == 666) {
+            if (tcp_header->doff > 5) {
+                //Move to the start of the tcp options
+                timestamps = skb->data + (ip_header->ihl * 4) + 20;
+                for (i = 0; i < tcp_header->doff - 5; ++i) {
+                    printk(KERN_INFO "Parsing an option\n");
+                    if (*timestamps == 0x00) {
+                        //End of options
+                        timestamps = NULL;
+                        break;
+                    }
+                    if (*timestamps == 0x01) {
+                        //NOP
+                        ++timestamps;
+                    } else if (*timestamps == 8) {
+                        printk(KERN_INFO "Timestamp option\n");
+                        //Timestamp option
+                        if (timestamps[1] != 10) {
+                            printk(KERN_INFO "Timestamp option was malformed\n");
+                            continue;
+                        }
+                        //Here we can modify send timestamp
+                        //Not receive since the echo is unidirectional
+                        //*((unsigned long *) (timestamps + 2)) = ntohl(0x12345678);
+                        timestamps[5] = 0x05;
+                    } else if (*timestamps == 3) {
+                        timestamps += 3;
+                    } else if (*timestamps == 4) {
+                        timestamps += 2;
+                    } else if (*timestamps == 5) {
+                        timestamps += timestamps[1];
+                    } else {
+                        timestamps += 4;
+                    }
+                }
+            }
+
             //Modify first byte of data
             packet_data[0] += 1;
             return NF_ACCEPT;
@@ -145,7 +179,8 @@ static int __init mod_init(void) {
     printk(KERN_ALERT "covert_kernel module loaded\n");
 
     nfho.hook = hook_func;
-    nfho.hooknum = NF_INET_PRE_ROUTING;
+    //nfho.hooknum = NF_INET_PRE_ROUTING;
+    nfho.hooknum = NF_INET_POST_ROUTING;
     nfho.pf = PF_INET;
     //Set hook highest priority
     nfho.priority = NF_IP_PRI_FIRST;
