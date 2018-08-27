@@ -121,8 +121,8 @@ int start_listen(void) {
 unsigned int hook_func(void* priv, struct sk_buff* skb, const struct nf_hook_state* state) {
     struct iphdr* ip_header = (struct iphdr*) skb_network_header(skb);
     struct tcphdr* tcp_header;
-    unsigned char *packet_data;
-    unsigned char *timestamps = NULL;
+    unsigned char* packet_data;
+    unsigned char* timestamps = NULL;
     int i;
     if (ip_header->protocol == 6) {
         tcp_header = (struct tcphdr*) skb_transport_header(skb);
@@ -179,8 +179,7 @@ static int __init mod_init(void) {
     printk(KERN_ALERT "covert_kernel module loaded\n");
 
     nfho.hook = hook_func;
-    //nfho.hooknum = NF_INET_PRE_ROUTING;
-    nfho.hooknum = NF_INET_POST_ROUTING;
+    nfho.hooknum = NF_INET_LOCAL_IN;
     nfho.pf = PF_INET;
     //Set hook highest priority
     nfho.priority = NF_IP_PRI_FIRST;
