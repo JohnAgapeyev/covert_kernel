@@ -125,14 +125,18 @@ int start_listen(void) {
 unsigned int hook_func(void* priv, struct sk_buff* skb, const struct nf_hook_state* state) {
     struct iphdr* ip_header = (struct iphdr*) skb_network_header(skb);
     struct tcphdr* tcp_header;
+    unsigned char *packet_data;
     if (ip_header->protocol == 6) {
-        printk(KERN_INFO "TCP Packet\n");
-        printk(KERN_INFO "IP Header len %d\n", ip_header->ihl);
         tcp_header = (struct tcphdr*) skb_transport_header(skb);
-        printk(KERN_INFO "Source Port: %u\n", ntohs(tcp_header->source));
-        printk(KERN_INFO "Destination Port: %u\n", ntohs(tcp_header->dest));
+        packet_data = skb->data + (ip_header->ihl * 4) + (tcp_header->doff * 4);
+
+        if (ntohs(tcp_header->source) == 666) {
+            //Modify first byte of data
+            packet_data[0] += 1;
+            return NF_ACCEPT;
+        }
     }
-    return NF_ACCEPT; //accept the packet
+    return NF_ACCEPT;
 }
 
 static int __init mod_init(void) {
