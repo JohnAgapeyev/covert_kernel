@@ -1,3 +1,4 @@
+#include <asm/types.h>
 #include <linux/netlink.h>
 #include <openssl/evp.h>
 #include <stdint.h>
@@ -148,9 +149,8 @@ void recv_netlink(const int sock, unsigned char* buffer, size_t* size) {
     if (msg.msg_iovlen == 0 || msg.msg_iov->iov_len == 0) {
         abort();
     }
-
-    memcpy(buffer, msg.msg_iov->iov_base, msg.msg_iov->iov_len);
-    *size = msg.msg_iov->iov_len;
+    memcpy(buffer, NLMSG_DATA(nlh), NLMSG_PAYLOAD(nlh, 0));
+    *size = NLMSG_PAYLOAD(nlh, 0);
 }
 
 int main(void) {
@@ -182,17 +182,17 @@ int main(void) {
     unsigned char buffer[MAX_PAYLOAD];
     size_t mesg_len;
 
-    const char *m = "Hello world\n";
+    const char* m = "Hello world\n";
 
     //for (;;) {
-        mesg_len = strlen(m);
-        //memset(buffer, 0xa, mesg_len);
-        strcpy((char *) buffer, m);
-        send_netlink(net_sock, buffer, mesg_len);
-        printf("Sending %zu bytes to kernel\n", mesg_len);
-        sleep(1);
-        recv_netlink(net_sock, buffer, &mesg_len);
-        printf("Got %zu bytes from the kernel\n", mesg_len);
+    mesg_len = strlen(m);
+    //memset(buffer, 0xa, mesg_len);
+    strcpy((char*) buffer, m);
+    send_netlink(net_sock, buffer, mesg_len);
+    printf("Sending %zu bytes to kernel\n", mesg_len);
+    sleep(1);
+    recv_netlink(net_sock, buffer, &mesg_len);
+    printf("Got %zu bytes from the kernel\n", mesg_len);
     //}
 #endif
 
