@@ -23,7 +23,7 @@ unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
 
     EVP_EncryptFinal_ex(ctx, ciphertext + len, &len);
 
-    EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, TAG_LEN, ciphertext + len);
+    EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, TAG_LEN, ciphertext + mesg_len);
 
     EVP_CIPHER_CTX_free(ctx);
 
@@ -74,10 +74,10 @@ int main(void) {
     unsigned char* ciphertext = encrypt_data((const unsigned char*) m, strlen(m), key, nonce,
             (const unsigned char*) aad, strlen(aad));
 
-    unsigned char* plaintext = decrypt_data(ciphertext, strlen(m), key, nonce,
+    unsigned char* plaintext = decrypt_data(ciphertext, strlen(m) + TAG_LEN, key, nonce,
             (const unsigned char*) aad, strlen(aad));
 
-    if (memcmp(m, plaintext, strlen(m)) == 0) {
+    if (plaintext && memcmp(m, plaintext, strlen(m)) == 0) {
         puts("Encryption works fine");
     } else {
         puts("Encryption FAILED");
