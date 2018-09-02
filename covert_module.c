@@ -29,6 +29,9 @@ int recv_msg(struct socket* sock, unsigned char* buf, int len) {
     struct kvec iov;
     int size = 0;
 
+    memset(&msg, 0, sizeof(struct msghdr));
+    memset(&iov, 0, sizeof(struct kvec));
+
     iov.iov_base = buf;
     iov.iov_len = len;
 
@@ -51,6 +54,9 @@ int send_msg(struct socket* sock, char* buf, int len) {
     struct msghdr msg;
     struct kvec iov;
     int size;
+
+    memset(&msg, 0, sizeof(struct msghdr));
+    memset(&iov, 0, sizeof(struct kvec));
 
     iov.iov_base = buf;
     iov.iov_len = len;

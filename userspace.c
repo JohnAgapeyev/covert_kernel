@@ -112,10 +112,12 @@ void send_netlink(const int sock, const unsigned char* data, const size_t len) {
     memcpy(NLMSG_DATA(nlh), data, len);
 
     struct iovec iov;
+    memset(&iov, 0, sizeof(struct iovec));
     iov.iov_base = (void*) nlh;
     iov.iov_len = nlh->nlmsg_len;
 
     struct msghdr msg;
+    memset(&msg, 0, sizeof(struct msghdr));
     msg.msg_name = (void*) &dest_addr;
     msg.msg_namelen = sizeof(dest_addr);
     msg.msg_iov = &iov;
@@ -125,7 +127,22 @@ void send_netlink(const int sock, const unsigned char* data, const size_t len) {
 }
 
 void recv_netlink(const int sock, unsigned char* buffer, size_t* size) {
+    struct sockaddr_nl nladdr;
     struct msghdr msg;
+    struct iovec iov;
+
+    memset(&msg, 0, sizeof(struct msghdr));
+    memset(&iov, 0, sizeof(struct iovec));
+    memset(&nladdr, 0, sizeof(struct sockaddr_nl));
+
+    iov.iov_base = (void*) nlh;
+    iov.iov_len = MAX_PAYLOAD;
+    msg.msg_name = (void*) &(nladdr);
+    msg.msg_namelen = sizeof(nladdr);
+
+    msg.msg_iov = &iov;
+    msg.msg_iovlen = 1;
+
     recvmsg(sock, &msg, 0);
 
     if (msg.msg_iovlen == 0 || msg.msg_iov->iov_len == 0) {
