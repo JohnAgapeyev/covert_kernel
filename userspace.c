@@ -183,10 +183,13 @@ int main(void) {
     size_t mesg_len;
 
     for (;;) {
-        recv_netlink(net_sock, buffer, &mesg_len);
-        printf("Got %zu bytes from the kernel\n", mesg_len);
+        mesg_len = 35;
+        memset(buffer, 0xa, mesg_len);
         send_netlink(net_sock, buffer, mesg_len);
         printf("Sending %zu bytes to kernel\n", mesg_len);
+        sleep(1);
+        recv_netlink(net_sock, buffer, &mesg_len);
+        printf("Got %zu bytes from the kernel\n", mesg_len);
     }
 #endif
 
