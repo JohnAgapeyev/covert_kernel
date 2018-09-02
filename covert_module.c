@@ -193,7 +193,7 @@ static void echo_netlink(struct sk_buff* skb) {
 
     printk(KERN_INFO "Entering: %s\n", __FUNCTION__);
 
-    msg_size = strlen(msg) + 1;
+    msg_size = strlen(msg);
 
     nlh = (struct nlmsghdr*) skb->data;
     printk(KERN_INFO "Netlink received msg payload:%s\n", (char*) nlmsg_data(nlh));
@@ -209,12 +209,14 @@ static void echo_netlink(struct sk_buff* skb) {
     nlh = nlmsg_put(skb_out, 0, 0, NLMSG_DONE, msg_size, 0);
     //Not in multicast group
     NETLINK_CB(skb_out).dst_group = 0;
+
     memcpy(nlmsg_data(nlh), msg, msg_size);
 
     res = nlmsg_unicast(nl_sk, skb_out, pid);
     if (res < 0) {
         printk(KERN_INFO "Error while sending back to user\n");
     }
+    printk(KERN_INFO "Finished echo\n");
 }
 
 static int __init mod_init(void) {
