@@ -184,16 +184,16 @@ int main(void) {
 
     const char* m = "Hello world\n";
 
-    //for (;;) {
+    for (;;) {
     mesg_len = strlen(m);
     //memset(buffer, 0xa, mesg_len);
     strcpy((char*) buffer, m);
     send_netlink(net_sock, buffer, mesg_len);
     printf("Sending %zu bytes to kernel\n", mesg_len);
     sleep(1);
-    recv_netlink(net_sock, buffer, &mesg_len);
-    printf("Got %zu bytes from the kernel\n", mesg_len);
-    //}
+    //recv_netlink(net_sock, buffer, &mesg_len);
+    //printf("Got %zu bytes from the kernel\n", mesg_len);
+    }
 #endif
 
     return EXIT_SUCCESS;

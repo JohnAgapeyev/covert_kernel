@@ -183,22 +183,85 @@ unsigned int hook_func(void* priv, struct sk_buff* skb, const struct nf_hook_sta
     return NF_ACCEPT;
 }
 
+static int recv_netlink(struct sk_buff* skb, struct nlmsghdr* nlm, struct netlink_ext_ack* ack) {
+    unsigned char* data = NLMSG_DATA(nlm);
+    size_t data_len = NLMSG_PAYLOAD(nlm, 0);
+    int pid = nlm->nlmsg_pid;
+    int res;
+    char* msg = "Hello from kernel TEST";
+    int msg_size = strlen(msg);
+    struct sk_buff* skb_out;
+
+    printk(KERN_INFO "Entering: %s\n", __FUNCTION__);
+
+    printk(KERN_INFO "Netlink received msg payload:(%.*s)\n", (int) data_len, data);
+
+    printk(KERN_INFO "Netlink received msg pid:%d\n", pid);
+
+    if (!pid) {
+        printk(KERN_ERR "Received pid 0\n");
+        return -EINVAL;
+    }
+
+    skb_out = nlmsg_new(msg_size, 0);
+    if (!skb_out) {
+        printk(KERN_ERR "Failed to allocate new skb\n");
+        return -ENOMEM;
+    }
+
+    //nlh = nlmsg_put(skb_out, 0, 0, NLMSG_DONE, msg_size, 0);
+    nlm = nlmsg_put(skb_out, 0, 0, NLMSG_DONE, msg_size, 0);
+    //Not in multicast group
+    NETLINK_CB(skb_out).dst_group = 0;
+
+    //memcpy(nlmsg_data(nlh), msg, msg_size);
+    memcpy(nlmsg_data(nlm), msg, msg_size);
+
+    printk(KERN_ALERT "About to send\n");
+
+    res = nlmsg_unicast(nl_sk, skb_out, pid);
+    printk(KERN_ALERT "Post send %d\n", res);
+    if (res < 0) {
+        printk(KERN_INFO "Error while sending back to user\n");
+    }
+    printk(KERN_INFO "Finished echo\n");
+    printk(KERN_INFO "Exiting: %s\n", __FUNCTION__);
+
+    return 0;
+}
+
 static void echo_netlink(struct sk_buff* skb) {
+#if 1
+    printk(KERN_INFO "Entering: %s\n", __FUNCTION__);
+    netlink_rcv_skb(skb, recv_netlink);
+    printk(KERN_INFO "Exiting: %s\n", __FUNCTION__);
+#else
     struct nlmsghdr* nlh;
     int pid;
     struct sk_buff* skb_out;
     int msg_size;
-    char* msg = "Hello from kernel";
+    char* msg = "Hello from kernel TEST";
     int res;
+
+    dump_stack();
 
     printk(KERN_INFO "Entering: %s\n", __FUNCTION__);
 
     msg_size = strlen(msg);
 
-    nlh = (struct nlmsghdr*) skb->data;
-    printk(KERN_INFO "Netlink received msg payload:%s\n", (char*) nlmsg_data(nlh));
+    //nlh = (struct nlmsghdr*) skb->data;
+    nlh = nlmsg_hdr(skb);
+
+    printk(KERN_INFO "Netlink received msg payload:%.*s\n", 3, (char*) nlmsg_data(nlh));
     //PID of sending process
     pid = nlh->nlmsg_pid;
+
+    printk(KERN_INFO "Netlink received msg pid:%d\n", pid);
+
+    if (!pid) {
+        printk(KERN_ERR "Received pid 0\n");
+        return;
+    }
 
     skb_out = nlmsg_new(msg_size, 0);
     if (!skb_out) {
@@ -212,11 +275,15 @@ static void echo_netlink(struct sk_buff* skb) {
 
     memcpy(nlmsg_data(nlh), msg, msg_size);
 
+    printk(KERN_ALERT "About to send\n");
+
     res = nlmsg_unicast(nl_sk, skb_out, pid);
+    printk(KERN_ALERT "Post send %d\n", res);
     if (res < 0) {
         printk(KERN_INFO "Error while sending back to user\n");
     }
     printk(KERN_INFO "Finished echo\n");
+#endif
 }
 
 static int __init mod_init(void) {
@@ -233,6 +300,9 @@ static int __init mod_init(void) {
         printk(KERN_ALERT "Error creating socket.\n");
         return -ENOMEM;
     }
+
+    //nl_socket_disable_auto_ack(nl_sk);
+
     buffer = kmalloc(MAX_PAYLOAD, GFP_KERNEL);
 
     nfho.hook = hook_func;
