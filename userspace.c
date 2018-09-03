@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/un.h>
 #include <unistd.h>
 
 #define TAG_LEN 16
@@ -75,6 +76,7 @@ unsigned char* decrypt_data(unsigned char* message, const size_t mesg_len, const
     return plaintext;
 }
 
+#if 0
 struct sockaddr_nl src_addr;
 struct sockaddr_nl dest_addr;
 struct nlmsghdr* nlh;
@@ -152,6 +154,9 @@ void recv_netlink(const int sock, unsigned char* buffer, size_t* size) {
     memcpy(buffer, NLMSG_DATA(nlh), NLMSG_PAYLOAD(nlh, 0));
     *size = NLMSG_PAYLOAD(nlh, 0);
 }
+#else
+
+#endif
 
 int main(void) {
 #if 0
@@ -177,6 +182,7 @@ int main(void) {
         puts("Encryption FAILED");
     }
 #else
+#if 0
     int net_sock = init_netlink();
 
     unsigned char buffer[MAX_PAYLOAD];
@@ -194,6 +200,37 @@ int main(void) {
     //recv_netlink(net_sock, buffer, &mesg_len);
     //printf("Got %zu bytes from the kernel\n", mesg_len);
     }
+#else
+    int sock = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+
+    const char* sock_path = "/var/run/covert_module";
+
+    struct sockaddr_un su;
+    memset(&su, 0, sizeof(struct sockaddr_un));
+    su.sun_family = AF_UNIX;
+    strcpy(su.sun_path, sock_path);
+
+    if (bind(sock, (struct sockaddr*) &su, sizeof(struct sockaddr_un)) == -1) {
+        perror("bind");
+    }
+
+    if (connect(sock, (struct sockaddr*) &su, sizeof(struct sockaddr_un)) == -1) {
+        perror("connect");
+    }
+
+    const char* m = "Hello kernel!\n";
+    write(sock, m, strlen(m) + 1);
+
+    unsigned char buff[100];
+    memset(buff, 0, 100);
+
+    read(sock, buff, 100);
+
+    printf("Received packet: %s\n", buff);
+
+    close(sock);
+
+#endif
 #endif
 
     return EXIT_SUCCESS;

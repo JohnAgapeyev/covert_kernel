@@ -10,6 +10,7 @@
 #include <linux/slab.h>
 #include <linux/tcp.h>
 #include <net/sock.h>
+#include <linux/un.h>
 
 #define PORT 666
 #define MAX_PAYLOAD 1024
@@ -82,9 +83,12 @@ int start_listen(void) {
     int i;
     int size;
     struct sockaddr_in sin;
-    int len = 15;
+    struct sockaddr_un sun;
+    int len = 100;
     unsigned char buf[len + 1];
-
+    const char* sock_path = "/var/run/covert_module";
+    const char* m = "Hello userspace!\n";
+#if 0
     error = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &svc->listen_socket);
     if (error < 0) {
         printk(KERN_ERR "cannot create socket\n");
@@ -124,6 +128,46 @@ int start_listen(void) {
 
         sock_release(acsock);
     }
+#else
+    error = sock_create(AF_UNIX, SOCK_SEQPACKET, 0, &svc->listen_socket);
+    if (error < 0) {
+        printk(KERN_ERR "cannot create socket\n");
+        return -1;
+    }
+    sun.sun_family = AF_UNIX;
+    strcpy(sun.sun_path, sock_path);
+
+    error = kernel_bind(svc->listen_socket, (struct sockaddr*) &sun, sizeof(sun));
+    if (error < 0) {
+        printk(KERN_ERR "cannot bind socket, error code: %d\n", error);
+        return -1;
+    }
+    error = kernel_listen(svc->listen_socket, 5);
+    if (error < 0) {
+        printk(KERN_ERR "cannot listen, error code: %d\n", error);
+        return -1;
+    }
+    i = 0;
+    while (!kthread_should_stop()) {
+        error = kernel_accept(svc->listen_socket, &acsock, 0);
+        if (error < 0) {
+            printk(KERN_ERR "cannot accept socket\n");
+            return -1;
+        }
+        printk(KERN_ERR "sock %d accepted\n", i++);
+
+        memset(&buf, 0, len + 1);
+        while (!kthread_should_stop() && (size = recv_msg(acsock, buf, len)) > 0) {
+            printk(KERN_INFO "Received user message: %s\n", buf);
+
+            strcpy(buf, m);
+
+            send_msg(acsock, buf, strlen(m) + 1);
+        }
+
+        sock_release(acsock);
+    }
+#endif
 
     return 0;
 }
