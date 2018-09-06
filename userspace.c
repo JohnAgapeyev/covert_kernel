@@ -209,8 +209,6 @@ int main(void) {
 
     printf("Received packet: %s\n", buff);
 
-    shutdown(sock, SHUT_RDWR);
-
     close(sock);
 
     unlink(sock_path);
