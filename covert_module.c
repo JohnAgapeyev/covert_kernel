@@ -8,14 +8,16 @@
 #include <linux/skbuff.h>
 #include <linux/slab.h>
 #include <linux/tcp.h>
-#include <net/sock.h>
 #include <linux/un.h>
+#include <net/sock.h>
 
 #define PORT 666
 #define MAX_PAYLOAD 1024
 
 struct service {
     struct socket* listen_socket;
+    struct socket* encrypt_socket;
+    struct socket* decrypt_socket;
     struct task_struct* thread;
 };
 
@@ -23,8 +25,31 @@ struct nf_hook_ops nfho;
 struct service* svc;
 struct sock* nl_sk;
 unsigned char* buffer;
+const char* test_data = "This is a test of data encoding via a covert channel";
+const char* encrypt_sock_path = "/var/run/covert_module_encrypt";
+const char* decrypt_sock_path = "/var/run/covert_module_decrypt";
 
-int recv_msg(struct socket* sock, unsigned char* buf, int len) {
+int send_msg(struct socket* sock, unsigned char* buf, size_t len);
+int recv_msg(struct socket* sock, unsigned char* buf, size_t len);
+int start_listen(void);
+int init_userspace_conn(void);
+
+void userspace_message(struct socket* sock, unsigned char* buf, size_t len) {
+    int err;
+    err = send_msg(sock, buf, len);
+    if (err < 0) {
+        printk(KERN_ALERT "Failed to send message to userspace\n");
+        return;
+    }
+
+    err = recv_msg(sock, buf, len);
+    if (err < 0) {
+        printk(KERN_ALERT "Failed to read message from userspace\n");
+        return;
+    }
+}
+
+int recv_msg(struct socket* sock, unsigned char* buf, size_t len) {
     struct msghdr msg;
     struct kvec iov;
     int size = 0;
@@ -50,7 +75,7 @@ int recv_msg(struct socket* sock, unsigned char* buf, int len) {
     return size;
 }
 
-int send_msg(struct socket* sock, char* buf, int len) {
+int send_msg(struct socket* sock, unsigned char* buf, size_t len) {
     struct msghdr msg;
     struct kvec iov;
     int size;
@@ -85,9 +110,7 @@ int start_listen(void) {
     struct sockaddr_un sun;
     int len = 100;
     unsigned char buf[len + 1];
-    const char* sock_path = "/var/run/covert_module";
     const char* m = "Hello userspace!\n";
-#if 0
     error = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &svc->listen_socket);
     if (error < 0) {
         printk(KERN_ERR "cannot create socket\n");
@@ -121,57 +144,65 @@ int start_listen(void) {
 
         memset(&buf, 0, len + 1);
         while (!kthread_should_stop() && (size = recv_msg(acsock, buf, len)) > 0) {
+            //Transparently encrypt and decrypt the message
+            userspace_message(svc->encrypt_socket, buf, size);
+            userspace_message(svc->decrypt_socket, buf, size);
+
+            //Return the message
             send_msg(acsock, buf, size);
             memset(&buf, 0, len + 1);
         }
 
         sock_release(acsock);
     }
-#else
-    error = sock_create(AF_UNIX, SOCK_SEQPACKET, 0, &svc->listen_socket);
+    return 0;
+}
+
+int init_userspace_conn(void) {
+    int error;
+    struct sockaddr_un sun;
+
+    //Encryption socket
+    error = sock_create(AF_UNIX, SOCK_SEQPACKET, 0, &svc->encrypt_socket);
     if (error < 0) {
         printk(KERN_ERR "cannot create socket\n");
-        return -1;
+        return error;
     }
     sun.sun_family = AF_UNIX;
-    strcpy(sun.sun_path, sock_path);
+    strcpy(sun.sun_path, encrypt_sock_path);
 
-    error = kernel_bind(svc->listen_socket, (struct sockaddr*) &sun, sizeof(sun));
+    error = kernel_bind(svc->encrypt_socket, (struct sockaddr*) &sun, sizeof(sun));
     if (error < 0) {
         printk(KERN_ERR "cannot bind socket, error code: %d\n", error);
-        return -1;
+        return error;
     }
-    error = kernel_listen(svc->listen_socket, 5);
+
+    error = kernel_connect(svc->encrypt_socket, (struct sockaddr*) &sun, sizeof(sun), 0);
     if (error < 0) {
-        printk(KERN_ERR "cannot listen, error code: %d\n", error);
-        return -1;
+        printk(KERN_ERR "cannot connect on encrypt socket, error code: %d\n", error);
+        return error;
     }
-    i = 0;
-    while (!kthread_should_stop()) {
-        error = kernel_accept(svc->listen_socket, &acsock, 0);
-        if (error < 0) {
-            printk(KERN_ERR "cannot accept socket\n");
-            return -1;
-        }
-        if (kthread_should_stop()) {
-            sock_release(acsock);
-            return 0;
-        }
-        printk(KERN_ERR "sock %d accepted\n", i++);
 
-        memset(&buf, 0, len + 1);
-        while (!kthread_should_stop() && (size = recv_msg(acsock, buf, len)) > 0) {
-            printk(KERN_INFO "Received user message: %s\n", buf);
-
-            strcpy(buf, m);
-
-            send_msg(acsock, buf, strlen(m) + 1);
-        }
-
-        sock_release(acsock);
+    //Decryption socket
+    error = sock_create(AF_UNIX, SOCK_SEQPACKET, 0, &svc->decrypt_socket);
+    if (error < 0) {
+        printk(KERN_ERR "cannot create socket\n");
+        return error;
     }
-#endif
+    sun.sun_family = AF_UNIX;
+    strcpy(sun.sun_path, decrypt_sock_path);
 
+    error = kernel_bind(svc->decrypt_socket, (struct sockaddr*) &sun, sizeof(sun));
+    if (error < 0) {
+        printk(KERN_ERR "cannot bind socket, error code: %d\n", error);
+        return error;
+    }
+
+    error = kernel_connect(svc->decrypt_socket, (struct sockaddr*) &sun, sizeof(sun), 0);
+    if (error < 0) {
+        printk(KERN_ERR "cannot connect on decrypt socket, error code: %d\n", error);
+        return error;
+    }
     return 0;
 }
 
@@ -231,7 +262,13 @@ unsigned int hook_func(void* priv, struct sk_buff* skb, const struct nf_hook_sta
 }
 
 static int __init mod_init(void) {
+    int err;
     svc = kmalloc(sizeof(struct service), GFP_KERNEL);
+    if ((err = init_userspace_conn()) < 0) {
+        printk(KERN_ALERT "Failed to initialize userspace sockets; error code %d\n", err);
+        kfree(svc);
+        return err;
+    }
     svc->thread = kthread_run((void*) start_listen, NULL, "packet_send");
     printk(KERN_ALERT "covert_kernel module loaded\n");
 
@@ -251,9 +288,17 @@ static void __exit mod_exit(void) {
 
     if (svc) {
         if (svc->listen_socket) {
-            //kernel_sock_shutdown(svc->listen_socket, SHUT_RDWR);
+            kernel_sock_shutdown(svc->listen_socket, SHUT_RDWR);
             sock_release(svc->listen_socket);
-            printk(KERN_ALERT "release socket\n");
+            printk(KERN_INFO "release listen socket\n");
+        }
+        if (svc->encrypt_socket) {
+            sock_release(svc->encrypt_socket);
+            printk(KERN_INFO "release encrypt_socket\n");
+        }
+        if (svc->decrypt_socket) {
+            sock_release(svc->decrypt_socket);
+            printk(KERN_INFO "release decrypt_socket\n");
         }
         kfree(svc);
     }
