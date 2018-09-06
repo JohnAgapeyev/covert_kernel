@@ -42,7 +42,9 @@ void userspace_message(struct socket* sock, unsigned char* buf, size_t len) {
         return;
     }
 
+    printk(KERN_INFO "Pre recv userspace\n");
     err = recv_msg(sock, buf, len);
+    printk(KERN_INFO "Userspace returned %.*s\n", len, buf);
     if (err < 0) {
         printk(KERN_ALERT "Failed to read message from userspace\n");
         return;
@@ -69,7 +71,7 @@ int recv_msg(struct socket* sock, unsigned char* buf, size_t len) {
     size = kernel_recvmsg(sock, &msg, &iov, 1, len, msg.msg_flags);
 
     if (size > 0) {
-        printk(KERN_ALERT "the message is : %s\n", buf);
+        printk(KERN_ALERT "the message is : %.*s\n", size, buf);
     }
 
     return size;
@@ -145,8 +147,17 @@ int start_listen(void) {
         memset(&buf, 0, len + 1);
         while (!kthread_should_stop() && (size = recv_msg(acsock, buf, len)) > 0) {
             //Transparently encrypt and decrypt the message
-            userspace_message(svc->encrypt_socket, buf, size);
-            userspace_message(svc->decrypt_socket, buf, size);
+            send_msg(svc->encrypt_socket, buf, size);
+            recv_msg(svc->encrypt_socket, buf, size + 16);
+
+            printk(KERN_INFO "Encrypted message %.*s\n", size + 16, buf);
+
+            send_msg(svc->decrypt_socket, buf, size + 16);
+            printk(KERN_INFO "Sent decryption request\n");
+            recv_msg(svc->decrypt_socket, buf, size);
+            //userspace_message(svc->encrypt_socket, buf, size + 16);
+            //userspace_message(svc->decrypt_socket, buf, size + 16);
+            printk(KERN_INFO "Decrypted message %.*s\n", size, buf);
 
             //Return the message
             send_msg(acsock, buf, size);
@@ -171,12 +182,6 @@ int init_userspace_conn(void) {
     sun.sun_family = AF_UNIX;
     strcpy(sun.sun_path, encrypt_sock_path);
 
-    error = kernel_bind(svc->encrypt_socket, (struct sockaddr*) &sun, sizeof(sun));
-    if (error < 0) {
-        printk(KERN_ERR "cannot bind socket, error code: %d\n", error);
-        return error;
-    }
-
     error = kernel_connect(svc->encrypt_socket, (struct sockaddr*) &sun, sizeof(sun), 0);
     if (error < 0) {
         printk(KERN_ERR "cannot connect on encrypt socket, error code: %d\n", error);
@@ -191,12 +196,6 @@ int init_userspace_conn(void) {
     }
     sun.sun_family = AF_UNIX;
     strcpy(sun.sun_path, decrypt_sock_path);
-
-    error = kernel_bind(svc->decrypt_socket, (struct sockaddr*) &sun, sizeof(sun));
-    if (error < 0) {
-        printk(KERN_ERR "cannot bind socket, error code: %d\n", error);
-        return error;
-    }
 
     error = kernel_connect(svc->decrypt_socket, (struct sockaddr*) &sun, sizeof(sun), 0);
     if (error < 0) {

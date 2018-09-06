@@ -62,10 +62,12 @@ unsigned char* decrypt_data(unsigned char* message, const size_t mesg_len, const
     EVP_DecryptUpdate(ctx, plaintext, &len, message, mesg_len - TAG_LEN);
 
     if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, TAG_LEN, message + mesg_len - TAG_LEN)) {
+        puts("Set tag failure");
         return NULL;
     }
 
     if (!EVP_DecryptFinal_ex(ctx, plaintext + len, &len)) {
+        puts("Decrypt call failure");
         return NULL;
     }
 
@@ -87,14 +89,33 @@ void socket_loop(const pid_t pid, const int sock) {
     for (;;) {
         int size = read(conn_sock, buffer, MAX_PAYLOAD);
 
+        unsigned char* modified_data;
+
         if (pid == 0) {
+            fprintf(stderr, "Decrypt Key %.*s\nNonce %.*s\n", KEY_LEN, key, NONCE_LEN, nonce);
+            for (int i = 0; i < size; ++i) {
+                printf("%02x", buffer[i]);
+            }
+            printf("\n");
             //Decrypt
-            decrypt_data(buffer, size, key, nonce, NULL, 0);
+            modified_data = decrypt_data(buffer, size, key, nonce, NULL, 0);
+            if (modified_data) {
+                write(conn_sock, modified_data, size - TAG_LEN);
+            } else {
+                fprintf(stderr, "Data failed to decrypt\n");
+            }
         } else {
+            fprintf(stderr, "Encrypt Key %.*s\nNonce %.*s\n", KEY_LEN, key, NONCE_LEN, nonce);
             //Encrypt
-            encrypt_data(buffer, size, key, nonce, NULL, 0);
+            modified_data = encrypt_data(buffer, size, key, nonce, NULL, 0);
+            for (int i = 0; i < size + TAG_LEN; ++i) {
+                printf("%02x", modified_data[i]);
+            }
+            printf("\n");
+            write(conn_sock, modified_data, size + TAG_LEN);
         }
-        write(conn_sock, buffer, size);
+
+        free(modified_data);
 
         //Increment the nonce after a successful write
         for (int i = NONCE_LEN - 1; i >= 0; --i) {
