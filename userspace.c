@@ -182,25 +182,6 @@ int main(void) {
         puts("Encryption FAILED");
     }
 #else
-#if 0
-    int net_sock = init_netlink();
-
-    unsigned char buffer[MAX_PAYLOAD];
-    size_t mesg_len;
-
-    const char* m = "Hello world\n";
-
-    for (;;) {
-    mesg_len = strlen(m);
-    //memset(buffer, 0xa, mesg_len);
-    strcpy((char*) buffer, m);
-    send_netlink(net_sock, buffer, mesg_len);
-    printf("Sending %zu bytes to kernel\n", mesg_len);
-    sleep(1);
-    //recv_netlink(net_sock, buffer, &mesg_len);
-    //printf("Got %zu bytes from the kernel\n", mesg_len);
-    }
-#else
     int sock = socket(AF_UNIX, SOCK_SEQPACKET, 0);
 
     const char* sock_path = "/var/run/covert_module";
@@ -228,9 +209,12 @@ int main(void) {
 
     printf("Received packet: %s\n", buff);
 
+    shutdown(sock, SHUT_RDWR);
+
     close(sock);
 
-#endif
+    unlink(sock_path);
+
 #endif
 
     return EXIT_SUCCESS;
