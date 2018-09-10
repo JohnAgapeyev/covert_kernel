@@ -1,5 +1,7 @@
 #include <asm/types.h>
+#include <assert.h>
 #include <linux/netlink.h>
+#include <openssl/err.h>
 #include <openssl/evp.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -13,6 +15,34 @@
 #define NONCE_LEN 12
 #define KEY_LEN 16
 #define MAX_PAYLOAD 1024
+
+#define libcrypto_error() \
+    do { \
+        fprintf(stderr, "Libcrypto error %s at %s, line %d in function %s\n", \
+                ERR_error_string(ERR_get_error(), NULL), __FILE__, __LINE__, __func__); \
+        exit(EXIT_FAILURE); \
+    } while (0)
+
+#define checkCryptoAPICall(pred) \
+    do { \
+        if ((pred) != 1) { \
+            libcrypto_error(); \
+        } \
+    } while (0)
+
+#define nullCheckCryptoAPICall(pred) \
+    do { \
+        if ((pred) == NULL) { \
+            libcrypto_error(); \
+        } \
+    } while (0)
+
+size_t encrypt_aead(const unsigned char* plaintext, size_t plain_len, const unsigned char* aad,
+        const size_t aad_len, const unsigned char* key, const unsigned char* iv,
+        unsigned char* ciphertext, unsigned char* tag);
+ssize_t decrypt_aead(const unsigned char* ciphertext, size_t cipher_len, const unsigned char* aad,
+        const size_t aad_len, const unsigned char* key, const unsigned char* iv,
+        const unsigned char* tag, unsigned char* plaintext);
 
 unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
         const unsigned char* key, const unsigned char* nonce, const unsigned char* aad,
@@ -48,23 +78,36 @@ unsigned char* decrypt_data(unsigned char* message, const size_t mesg_len, const
         const unsigned char* nonce, const unsigned char* aad, const size_t aad_len) {
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
 
-    EVP_DecryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, key, nonce);
+    if (!EVP_DecryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, key, nonce)) {
+        puts("Init failure");
+        return NULL;
+    }
 
     int len;
-    EVP_DecryptUpdate(ctx, NULL, &len, aad, aad_len);
+    if (!EVP_DecryptUpdate(ctx, NULL, &len, aad, aad_len)) {
+        puts("AAD set failure");
+        return NULL;
+    }
 
     if (mesg_len <= TAG_LEN) {
         return NULL;
     }
 
-    unsigned char* plaintext = malloc(mesg_len - TAG_LEN);
+    //unsigned char* plaintext = malloc(mesg_len - TAG_LEN);
+    unsigned char* plaintext = malloc(mesg_len);
 
-    EVP_DecryptUpdate(ctx, plaintext, &len, message, mesg_len - TAG_LEN);
+    if (!EVP_DecryptUpdate(ctx, plaintext, &len, message, mesg_len - TAG_LEN - 1)) {
+        puts("decrypt update failure");
+        return NULL;
+    }
 
-    if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, TAG_LEN, message + mesg_len - TAG_LEN)) {
+    if (!EVP_CIPHER_CTX_ctrl(
+                ctx, EVP_CTRL_GCM_SET_TAG, TAG_LEN, message + mesg_len - TAG_LEN - 1)) {
         puts("Set tag failure");
         return NULL;
     }
+
+    printf("Decrypt len %d\n", len);
 
     if (!EVP_DecryptFinal_ex(ctx, plaintext + len, &len)) {
         puts("Decrypt call failure");
@@ -93,12 +136,24 @@ void socket_loop(const pid_t pid, const int sock) {
 
         if (pid == 0) {
             fprintf(stderr, "Decrypt Key %.*s\nNonce %.*s\n", KEY_LEN, key, NONCE_LEN, nonce);
+            puts("Key:");
+            for (int i = 0; i < KEY_LEN; ++i) {
+                printf("%02x", key[i]);
+            }
+            printf("\n");
+            puts("Nonce:");
+            for (int i = 0; i < NONCE_LEN; ++i) {
+                printf("%02x", nonce[i]);
+            }
+            printf("\n");
+            puts("Data:");
             for (int i = 0; i < size; ++i) {
                 printf("%02x", buffer[i]);
             }
             printf("\n");
             //Decrypt
-            modified_data = decrypt_data(buffer, size, key, nonce, NULL, 0);
+            //modified_data = decrypt_data(buffer, size, key, nonce, NULL, 0);
+            ssize_t res = decrypt_aead(buffer, size, NULL, 0, key, nonce, modified_data);
             if (modified_data) {
                 write(conn_sock, modified_data, size - TAG_LEN);
             } else {
@@ -108,6 +163,17 @@ void socket_loop(const pid_t pid, const int sock) {
             fprintf(stderr, "Encrypt Key %.*s\nNonce %.*s\n", KEY_LEN, key, NONCE_LEN, nonce);
             //Encrypt
             modified_data = encrypt_data(buffer, size, key, nonce, NULL, 0);
+            puts("Key:");
+            for (int i = 0; i < KEY_LEN; ++i) {
+                printf("%02x", key[i]);
+            }
+            printf("\n");
+            puts("Nonce:");
+            for (int i = 0; i < NONCE_LEN; ++i) {
+                printf("%02x", nonce[i]);
+            }
+            printf("\n");
+            puts("Data:");
             for (int i = 0; i < size + TAG_LEN; ++i) {
                 printf("%02x", modified_data[i]);
             }
@@ -136,7 +202,8 @@ void socket_loop(const pid_t pid, const int sock) {
 
 int main(void) {
 #if 0
-    const char* m = "Hello World";
+    unsigned char mesg[32];
+    memset(mesg, 'A', 32);
 
     unsigned char nonce[NONCE_LEN];
     memset(nonce, 0xab, NONCE_LEN);
@@ -146,13 +213,13 @@ int main(void) {
 
     const char* aad = "Goodbye World";
 
-    unsigned char* ciphertext = encrypt_data((const unsigned char*) m, strlen(m), key, nonce,
-            (const unsigned char*) aad, strlen(aad));
+    unsigned char* ciphertext = encrypt_data(mesg, 32, key, nonce,
+            NULL, 0);
 
     unsigned char* plaintext = decrypt_data(
-            ciphertext, strlen(m) + TAG_LEN, key, nonce, (const unsigned char*) aad, strlen(aad));
+            ciphertext, 32 + TAG_LEN, key, nonce, NULL, 0);
 
-    if (plaintext && memcmp(m, plaintext, strlen(m)) == 0) {
+    if (plaintext && memcmp(mesg, plaintext, 32) == 0) {
         puts("Encryption works fine");
     } else {
         puts("Encryption FAILED");
@@ -236,4 +303,77 @@ int main(void) {
 #endif
 
     return EXIT_SUCCESS;
+}
+
+EVP_PKEY* allocateKeyPair(void) {
+    EVP_PKEY* out;
+    nullCheckCryptoAPICall(out = EVP_PKEY_new());
+    return out;
+}
+
+size_t encrypt_aead(const unsigned char* plaintext, size_t plain_len, const unsigned char* aad,
+        const size_t aad_len, const unsigned char* key, const unsigned char* iv,
+        unsigned char* ciphertext, unsigned char* tag) {
+    EVP_CIPHER_CTX* ctx;
+    nullCheckCryptoAPICall(ctx = EVP_CIPHER_CTX_new());
+
+    checkCryptoAPICall(EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL));
+
+    checkCryptoAPICall(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, TAG_LEN, NULL));
+
+    checkCryptoAPICall(EVP_EncryptInit_ex(ctx, NULL, NULL, key, iv));
+
+    int len;
+    checkCryptoAPICall(EVP_EncryptUpdate(ctx, NULL, &len, aad, aad_len));
+
+    checkCryptoAPICall(EVP_EncryptUpdate(ctx, ciphertext, &len, plaintext, plain_len));
+
+    int ciphertextlen = len;
+    checkCryptoAPICall(EVP_EncryptFinal_ex(ctx, ciphertext + len, &len));
+
+    ciphertextlen += len;
+
+    checkCryptoAPICall(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, TAG_LEN, tag));
+
+    EVP_CIPHER_CTX_free(ctx);
+
+    assert(ciphertextlen >= 0);
+
+    return ciphertextlen;
+}
+
+ssize_t decrypt_aead(const unsigned char* ciphertext, size_t cipher_len, const unsigned char* aad,
+        const size_t aad_len, const unsigned char* key, const unsigned char* iv,
+        const unsigned char* tag, unsigned char* plaintext) {
+    EVP_CIPHER_CTX* ctx;
+    nullCheckCryptoAPICall(ctx = EVP_CIPHER_CTX_new());
+
+    checkCryptoAPICall(EVP_DecryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, NULL, NULL));
+
+    checkCryptoAPICall(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, TAG_LEN, NULL));
+
+    checkCryptoAPICall(EVP_DecryptInit_ex(ctx, NULL, NULL, key, iv));
+
+    int len;
+    checkCryptoAPICall(EVP_DecryptUpdate(ctx, NULL, &len, aad, aad_len));
+
+    checkCryptoAPICall(EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, cipher_len));
+
+    int plaintextlen = len;
+
+    if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, TAG_LEN, (unsigned char*) tag)) {
+        libcrypto_error();
+    }
+
+    ssize_t ret = EVP_DecryptFinal_ex(ctx, plaintext + len, &len);
+
+    plaintextlen += len;
+
+    EVP_CIPHER_CTX_free(ctx);
+
+    if (ret > 0) {
+        assert(plaintextlen >= 0);
+        return plaintextlen;
+    }
+    return -1;
 }
