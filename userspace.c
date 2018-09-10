@@ -66,7 +66,19 @@ unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
 
     EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, TAG_LEN, ciphertext + mesg_len);
 
+    printf("Pre Nonce:\n");
+    for (int i = 0; i < NONCE_LEN; ++i) {
+        printf("%02x", nonce[i]);
+    }
+    printf("\n");
+
     memcpy(ciphertext + mesg_len + TAG_LEN, nonce, NONCE_LEN);
+
+    printf("Post Nonce:\n");
+    for (int i = 0; i < NONCE_LEN; ++i) {
+        printf("%02x", ciphertext[mesg_len + TAG_LEN + i]);
+    }
+    printf("\n");
 
     EVP_CIPHER_CTX_free(ctx);
 
@@ -76,6 +88,12 @@ unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
 unsigned char* decrypt_data(unsigned char* message, const size_t mesg_len, const unsigned char* key,
         const unsigned char* aad, const size_t aad_len) {
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
+
+    printf("Nonce:\n");
+    for (int i = 0; i < NONCE_LEN; ++i) {
+        printf("%02x", message[mesg_len - NONCE_LEN + i]);
+    }
+    printf("\n");
 
     if (!EVP_DecryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, key, message + mesg_len - NONCE_LEN)) {
         puts("Init failure");
@@ -95,10 +113,22 @@ unsigned char* decrypt_data(unsigned char* message, const size_t mesg_len, const
 
     unsigned char* plaintext = malloc(mesg_len - TAG_LEN - NONCE_LEN);
 
+    printf("Message:\n");
+    for (unsigned long i = 0; i < mesg_len - TAG_LEN - NONCE_LEN; ++i) {
+        printf("%02x", message[i]);
+    }
+    printf("\n");
+
     if (!EVP_DecryptUpdate(ctx, plaintext, &len, message, mesg_len - TAG_LEN - NONCE_LEN)) {
         puts("decrypt update failure");
         return NULL;
     }
+
+    printf("Tag:\n");
+    for (unsigned long i = 0; i < TAG_LEN; ++i) {
+        printf("%02x", message[mesg_len - TAG_LEN - NONCE_LEN + i]);
+    }
+    printf("\n");
 
     if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, TAG_LEN, message + mesg_len - TAG_LEN - NONCE_LEN)) {
         puts("Set tag failure");
