@@ -26,6 +26,8 @@ struct nf_hook_ops nfho;
 struct service* svc;
 struct sock* nl_sk;
 unsigned char* buffer;
+unsigned char* encrypted_test_data;
+size_t data_len;
 const char* test_data = "This is a test of data encoding via a covert channel";
 const char* encrypt_sock_path = "/var/run/covert_module_encrypt";
 const char* decrypt_sock_path = "/var/run/covert_module_decrypt";
@@ -313,6 +315,16 @@ static int __init mod_init(void) {
     printk(KERN_ALERT "covert_kernel module loaded\n");
 
     buffer = kmalloc(MAX_PAYLOAD, GFP_KERNEL);
+    encrypted_test_data = kmalloc(MAX_PAYLOAD, GFP_KERNEL);
+
+    //Get the encrypted version of my test data
+    strcpy(buffer, test_data);
+    send_msg(svc->encrypt_socket, buffer, strlen(test_data));
+    recv_msg(svc->encrypt_socket, encrypted_test_data, strlen(test_data) + 16);
+
+    data_len = strlen(test_data) + 16;
+
+    printk(KERN_INFO "Data length %zu\n", data_len);
 
     nfhi.hook = incoming_hook;
     nfhi.hooknum = NF_INET_LOCAL_IN;
@@ -352,6 +364,9 @@ static void __exit mod_exit(void) {
 
     if (buffer) {
         kfree(buffer);
+    }
+    if (encrypted_test_data) {
+        kfree(encrypted_test_data);
     }
 
     printk(KERN_ALERT "removed covert_kernel module\n");
