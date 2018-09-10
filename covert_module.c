@@ -21,6 +21,7 @@ struct service {
     struct task_struct* thread;
 };
 
+struct nf_hook_ops nfhi;
 struct nf_hook_ops nfho;
 struct service* svc;
 struct sock* nl_sk;
@@ -33,23 +34,6 @@ int send_msg(struct socket* sock, unsigned char* buf, size_t len);
 int recv_msg(struct socket* sock, unsigned char* buf, size_t len);
 int start_listen(void);
 int init_userspace_conn(void);
-
-void userspace_message(struct socket* sock, unsigned char* buf, size_t len) {
-    int err;
-    err = send_msg(sock, buf, len);
-    if (err < 0) {
-        printk(KERN_ALERT "Failed to send message to userspace\n");
-        return;
-    }
-
-    printk(KERN_INFO "Pre recv userspace\n");
-    err = recv_msg(sock, buf, len);
-    printk(KERN_INFO "Userspace returned %.*s\n", len, buf);
-    if (err < 0) {
-        printk(KERN_ALERT "Failed to read message from userspace\n");
-        return;
-    }
-}
 
 int recv_msg(struct socket* sock, unsigned char* buf, size_t len) {
     struct msghdr msg;
@@ -205,7 +189,64 @@ int init_userspace_conn(void) {
     return 0;
 }
 
-unsigned int hook_func(void* priv, struct sk_buff* skb, const struct nf_hook_state* state) {
+unsigned int incoming_hook(void* priv, struct sk_buff* skb, const struct nf_hook_state* state) {
+#if 0
+    struct iphdr* ip_header = (struct iphdr*) skb_network_header(skb);
+    struct tcphdr* tcp_header;
+    unsigned char* packet_data;
+    unsigned char* timestamps = NULL;
+    int i;
+    if (ip_header->protocol == 6) {
+        tcp_header = (struct tcphdr*) skb_transport_header(skb);
+        packet_data = skb->data + (ip_header->ihl * 4) + (tcp_header->doff * 4);
+
+        if (ntohs(tcp_header->source) == 666) {
+            if (tcp_header->doff > 5) {
+                //Move to the start of the tcp options
+                timestamps = skb->data + (ip_header->ihl * 4) + 20;
+                for (i = 0; i < tcp_header->doff - 5; ++i) {
+                    printk(KERN_INFO "Parsing an option\n");
+                    if (*timestamps == 0x00) {
+                        //End of options
+                        timestamps = NULL;
+                        break;
+                    }
+                    if (*timestamps == 0x01) {
+                        //NOP
+                        ++timestamps;
+                    } else if (*timestamps == 8) {
+                        printk(KERN_INFO "Timestamp option\n");
+                        //Timestamp option
+                        if (timestamps[1] != 10) {
+                            printk(KERN_INFO "Timestamp option was malformed\n");
+                            continue;
+                        }
+                        //Here we can modify send timestamp
+                        //Not receive since the echo is unidirectional
+                        *((unsigned long *) (timestamps + 2)) = ntohl(0x12345678);
+                        //timestamps[5] = 0x05;
+                    } else if (*timestamps == 3) {
+                        timestamps += 3;
+                    } else if (*timestamps == 4) {
+                        timestamps += 2;
+                    } else if (*timestamps == 5) {
+                        timestamps += timestamps[1];
+                    } else {
+                        timestamps += 4;
+                    }
+                }
+            }
+
+            //Modify first byte of data
+            packet_data[0] += 1;
+            return NF_ACCEPT;
+        }
+    }
+#endif
+    return NF_ACCEPT;
+}
+
+unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook_state* state) {
     struct iphdr* ip_header = (struct iphdr*) skb_network_header(skb);
     struct tcphdr* tcp_header;
     unsigned char* packet_data;
@@ -273,18 +314,24 @@ static int __init mod_init(void) {
 
     buffer = kmalloc(MAX_PAYLOAD, GFP_KERNEL);
 
-    nfho.hook = hook_func;
-    //nfho.hooknum = NF_INET_LOCAL_IN;
-    nfho.hooknum = NF_INET_LOCAL_OUT;
-    nfho.pf = PF_INET;
+    nfhi.hook = incoming_hook;
+    nfhi.hooknum = NF_INET_LOCAL_IN;
+    nfhi.pf = PF_INET;
     //Set hook highest priority
-    nfho.priority = NF_IP_PRI_FIRST;
+    nfhi.priority = NF_IP_PRI_FIRST;
+    nf_register_net_hook(&init_net, &nfhi);
+
+    memcpy(&nfho, &nfhi, sizeof(struct nf_hook_ops));
+    nfho.hook = outgoing_hook;
+    nfho.hooknum = NF_INET_LOCAL_OUT;
+
     nf_register_net_hook(&init_net, &nfho);
     return 0;
 }
 
 static void __exit mod_exit(void) {
     nf_unregister_net_hook(&init_net, &nfho);
+    nf_unregister_net_hook(&init_net, &nfhi);
 
     if (svc) {
         if (svc->listen_socket) {
