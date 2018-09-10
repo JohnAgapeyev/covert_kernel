@@ -14,14 +14,8 @@
 
 #define TAG_LEN 16
 #define NONCE_LEN 12
-#define KEY_LEN 16
+#define KEY_LEN 32
 #define MAX_PAYLOAD 1024
-
-#define SYMMETRIC_KEY_SIZE 16
-#define IV_SIZE 16
-#define BLOCK_SIZE 16
-#define TAG_SIZE 16
-#define HASH_SIZE 32
 
 #define libcrypto_error() \
     do { \
@@ -43,13 +37,6 @@
             libcrypto_error(); \
         } \
     } while (0)
-
-size_t encrypt_aead(const unsigned char* plaintext, size_t plain_len, const unsigned char* aad,
-        const size_t aad_len, const unsigned char* key, const unsigned char* iv,
-        unsigned char* ciphertext, unsigned char* tag);
-ssize_t decrypt_aead(const unsigned char* ciphertext, size_t cipher_len, const unsigned char* aad,
-        const size_t aad_len, const unsigned char* key, const unsigned char* iv,
-        const unsigned char* tag, unsigned char* plaintext);
 
 unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
         const unsigned char* key, const unsigned char* nonce, const unsigned char* aad,
@@ -100,16 +87,15 @@ unsigned char* decrypt_data(unsigned char* message, const size_t mesg_len, const
         return NULL;
     }
 
-    //unsigned char* plaintext = malloc(mesg_len - TAG_LEN);
-    unsigned char* plaintext = malloc(mesg_len);
+    unsigned char* plaintext = malloc(mesg_len - TAG_LEN);
 
-    if (!EVP_DecryptUpdate(ctx, plaintext, &len, message, mesg_len - TAG_LEN - 1)) {
+    if (!EVP_DecryptUpdate(ctx, plaintext, &len, message, mesg_len - TAG_LEN)) {
         puts("decrypt update failure");
         return NULL;
     }
 
     if (!EVP_CIPHER_CTX_ctrl(
-                ctx, EVP_CTRL_GCM_SET_TAG, TAG_LEN, message + mesg_len - TAG_LEN - 1)) {
+                ctx, EVP_CTRL_GCM_SET_TAG, TAG_LEN, message + mesg_len - TAG_LEN)) {
         puts("Set tag failure");
         return NULL;
     }
@@ -208,7 +194,7 @@ void socket_loop(const pid_t pid, const int sock) {
 }
 
 int main(void) {
-#if 1
+#if 0
     unsigned char mesg[32];
     memset(mesg, 'A', 32);
 
@@ -220,7 +206,6 @@ int main(void) {
 
     const char* aad = "Goodbye World";
 
-#if 0
     unsigned char* ciphertext = encrypt_data(mesg, 32, key, nonce,
             NULL, 0);
 
@@ -232,65 +217,6 @@ int main(void) {
     } else {
         puts("Encryption FAILED");
     }
-#else
-    const unsigned char* testString = (const unsigned char*) "Hello world";
-    size_t testStringLen = strlen(testString);
-
-    unsigned char testKey[SYMMETRIC_KEY_SIZE];
-    unsigned char testIV[IV_SIZE];
-    unsigned char testaad[IV_SIZE];
-
-    memset(testKey, 0xae, SYMMETRIC_KEY_SIZE);
-    memset(testIV, 0xae, IV_SIZE);
-    memset(testaad, 0xae, IV_SIZE);
-
-    unsigned char ciphertxt[testStringLen];
-    unsigned char tag[BLOCK_SIZE];
-
-    size_t cipherLen = encrypt_aead(
-            testString, testStringLen, testaad, IV_SIZE, testKey, testIV, ciphertxt, tag);
-
-    unsigned char plaintext[testStringLen + 1];
-
-    ssize_t plainLen
-            = decrypt_aead(ciphertxt, cipherLen, testaad, IV_SIZE, testKey, testIV, tag, plaintext);
-
-    plaintext[testStringLen] = '\0';
-
-    bool rtn = (strcmp((char*) plaintext, (char*) testString) == 0);
-
-    //Modification
-    testaad[0] ^= 1;
-    testaad[1] &= 1;
-    testaad[2] += 1;
-
-    plainLen
-            = decrypt_aead(ciphertxt, cipherLen, testaad, IV_SIZE, testKey, testIV, tag, plaintext);
-    if (plainLen == -1) {
-        puts("Encryption works!");
-    } else {
-        puts("Encryption FAILS!");
-    }
-
-#if 0
-    unsigned char ciphertext[100];
-
-    unsigned char plaintext[100];
-
-    unsigned char tag[100];
-
-    size_t l = encrypt_aead(mesg, 32, (const unsigned char*) aad, strlen(aad), key, nonce, ciphertext, tag);
-    printf("Len %zu\n", l);
-
-    if (decrypt_aead(ciphertext, 32, (const unsigned char*) aad, strlen(aad), key, nonce, tag, plaintext)
-            && memcmp(mesg, plaintext, 32) == 0) {
-        puts("Encryption works fine");
-    } else {
-        puts("Encryption FAILED");
-    }
-#endif
-#endif
-
 #else
 
     //Daemonize
@@ -372,75 +298,3 @@ int main(void) {
     return EXIT_SUCCESS;
 }
 
-EVP_PKEY* allocateKeyPair(void) {
-    EVP_PKEY* out;
-    nullCheckCryptoAPICall(out = EVP_PKEY_new());
-    return out;
-}
-
-size_t encrypt_aead(const unsigned char* plaintext, size_t plain_len, const unsigned char* aad,
-        const size_t aad_len, const unsigned char* key, const unsigned char* iv,
-        unsigned char* ciphertext, unsigned char* tag) {
-    EVP_CIPHER_CTX* ctx;
-    nullCheckCryptoAPICall(ctx = EVP_CIPHER_CTX_new());
-
-    checkCryptoAPICall(EVP_EncryptInit_ex(ctx, EVP_aes_256_gcm(), NULL, NULL, NULL));
-
-    checkCryptoAPICall(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, TAG_LEN, NULL));
-
-    checkCryptoAPICall(EVP_EncryptInit_ex(ctx, NULL, NULL, key, iv));
-
-    int len;
-    checkCryptoAPICall(EVP_EncryptUpdate(ctx, NULL, &len, aad, aad_len));
-
-    checkCryptoAPICall(EVP_EncryptUpdate(ctx, ciphertext, &len, plaintext, plain_len));
-
-    int ciphertextlen = len;
-    checkCryptoAPICall(EVP_EncryptFinal_ex(ctx, ciphertext + len, &len));
-
-    ciphertextlen += len;
-
-    checkCryptoAPICall(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, TAG_LEN, tag));
-
-    EVP_CIPHER_CTX_free(ctx);
-
-    assert(ciphertextlen >= 0);
-
-    return ciphertextlen;
-}
-
-ssize_t decrypt_aead(const unsigned char* ciphertext, size_t cipher_len, const unsigned char* aad,
-        const size_t aad_len, const unsigned char* key, const unsigned char* iv,
-        const unsigned char* tag, unsigned char* plaintext) {
-    EVP_CIPHER_CTX* ctx;
-    nullCheckCryptoAPICall(ctx = EVP_CIPHER_CTX_new());
-
-    checkCryptoAPICall(EVP_DecryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, NULL, NULL));
-
-    checkCryptoAPICall(EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_IVLEN, TAG_LEN, NULL));
-
-    checkCryptoAPICall(EVP_DecryptInit_ex(ctx, NULL, NULL, key, iv));
-
-    int len;
-    checkCryptoAPICall(EVP_DecryptUpdate(ctx, NULL, &len, aad, aad_len));
-
-    checkCryptoAPICall(EVP_DecryptUpdate(ctx, plaintext, &len, ciphertext, cipher_len));
-
-    int plaintextlen = len;
-
-    if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, TAG_LEN, (unsigned char*) tag)) {
-        libcrypto_error();
-    }
-
-    ssize_t ret = EVP_DecryptFinal_ex(ctx, plaintext + len, &len);
-
-    plaintextlen += len;
-
-    EVP_CIPHER_CTX_free(ctx);
-
-    if (ret > 0) {
-        assert(plaintextlen >= 0);
-        return plaintextlen;
-    }
-    return -1;
-}
