@@ -134,16 +134,16 @@ int start_listen(void) {
         while (!kthread_should_stop() && (size = recv_msg(acsock, buf, len)) > 0) {
             //Transparently encrypt and decrypt the message
             send_msg(svc->encrypt_socket, buf, size);
-            recv_msg(svc->encrypt_socket, buf, size + 16);
+            recv_msg(svc->encrypt_socket, buf, size + 16 + 12);
 
-            //printk(KERN_INFO "Encrypted message %.*s\n", size + 16, buf);
+            printk(KERN_INFO "Encrypted message %.*s\n", size + 16, buf);
 
-            send_msg(svc->decrypt_socket, buf, size + 16);
-            //printk(KERN_INFO "Sent decryption request\n");
+            send_msg(svc->decrypt_socket, buf, size + 16 + 12);
+            printk(KERN_INFO "Sent decryption request\n");
             recv_msg(svc->decrypt_socket, buf, size);
             //userspace_message(svc->encrypt_socket, buf, size + 16);
             //userspace_message(svc->decrypt_socket, buf, size + 16);
-            //printk(KERN_INFO "Decrypted message %.*s\n", size, buf);
+            printk(KERN_INFO "Decrypted message %.*s\n", size, buf);
 
             //Return the message
             send_msg(acsock, buf, size);
@@ -320,9 +320,9 @@ static int __init mod_init(void) {
     //Get the encrypted version of my test data
     strcpy(buffer, test_data);
     send_msg(svc->encrypt_socket, buffer, strlen(test_data));
-    recv_msg(svc->encrypt_socket, encrypted_test_data, strlen(test_data) + 16);
+    recv_msg(svc->encrypt_socket, encrypted_test_data, strlen(test_data) + 16 + 12);
 
-    data_len = strlen(test_data) + 16;
+    data_len = strlen(test_data) + 16 + 12;
 
     printk(KERN_INFO "Data length %zu\n", data_len);
 

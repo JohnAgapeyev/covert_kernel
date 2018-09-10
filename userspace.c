@@ -3,6 +3,7 @@
 #include <linux/netlink.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
+#include <openssl/rand.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -39,15 +40,17 @@
     } while (0)
 
 unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
-        const unsigned char* key, const unsigned char* nonce, const unsigned char* aad,
-        const size_t aad_len);
+        const unsigned char* key, const unsigned char* aad, const size_t aad_len);
 unsigned char* decrypt_data(unsigned char* message, const size_t mesg_len, const unsigned char* key,
-        const unsigned char* nonce, const unsigned char* aad, const size_t aad_len);
+        const unsigned char* aad, const size_t aad_len);
+
 void socket_loop(const pid_t pid, const int sock);
 
 unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
-        const unsigned char* key, const unsigned char* nonce, const unsigned char* aad,
-        const size_t aad_len) {
+        const unsigned char* key, const unsigned char* aad, const size_t aad_len) {
+    unsigned char nonce[NONCE_LEN];
+    RAND_bytes(nonce, NONCE_LEN);
+
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
     EVP_EncryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, key, nonce);
 
@@ -55,7 +58,7 @@ unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
     EVP_EncryptUpdate(ctx, NULL, &len, aad, aad_len);
 
     //Allocate enough for the message and the tag
-    unsigned char* ciphertext = malloc(mesg_len + TAG_LEN);
+    unsigned char* ciphertext = malloc(mesg_len + TAG_LEN + NONCE_LEN);
 
     EVP_EncryptUpdate(ctx, ciphertext, &len, message, mesg_len);
 
@@ -63,16 +66,18 @@ unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
 
     EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, TAG_LEN, ciphertext + mesg_len);
 
+    memcpy(ciphertext + mesg_len + TAG_LEN, nonce, NONCE_LEN);
+
     EVP_CIPHER_CTX_free(ctx);
 
     return ciphertext;
 }
 
 unsigned char* decrypt_data(unsigned char* message, const size_t mesg_len, const unsigned char* key,
-        const unsigned char* nonce, const unsigned char* aad, const size_t aad_len) {
+        const unsigned char* aad, const size_t aad_len) {
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
 
-    if (!EVP_DecryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, key, nonce)) {
+    if (!EVP_DecryptInit_ex(ctx, EVP_chacha20_poly1305(), NULL, key, message + mesg_len - NONCE_LEN)) {
         puts("Init failure");
         return NULL;
     }
@@ -83,19 +88,19 @@ unsigned char* decrypt_data(unsigned char* message, const size_t mesg_len, const
         return NULL;
     }
 
-    if (mesg_len <= TAG_LEN) {
+    if (mesg_len <= TAG_LEN + NONCE_LEN) {
+        puts("Invalid message length");
         return NULL;
     }
 
-    unsigned char* plaintext = malloc(mesg_len - TAG_LEN);
+    unsigned char* plaintext = malloc(mesg_len - TAG_LEN - NONCE_LEN);
 
-    if (!EVP_DecryptUpdate(ctx, plaintext, &len, message, mesg_len - TAG_LEN)) {
+    if (!EVP_DecryptUpdate(ctx, plaintext, &len, message, mesg_len - TAG_LEN - NONCE_LEN)) {
         puts("decrypt update failure");
         return NULL;
     }
 
-    if (!EVP_CIPHER_CTX_ctrl(
-                ctx, EVP_CTRL_GCM_SET_TAG, TAG_LEN, message + mesg_len - TAG_LEN)) {
+    if (!EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_SET_TAG, TAG_LEN, message + mesg_len - TAG_LEN - NONCE_LEN)) {
         puts("Set tag failure");
         return NULL;
     }
@@ -113,10 +118,10 @@ unsigned char* decrypt_data(unsigned char* message, const size_t mesg_len, const
 void socket_loop(const pid_t pid, const int sock) {
     unsigned char buffer[MAX_PAYLOAD];
     unsigned char key[KEY_LEN];
-    unsigned char nonce[NONCE_LEN];
+    //unsigned char nonce[NONCE_LEN];
 
     memset(key, 0xab, KEY_LEN);
-    memset(nonce, 0, NONCE_LEN);
+    //memset(nonce, 0, NONCE_LEN);
 
     int conn_sock = accept(sock, NULL, 0);
 
@@ -127,7 +132,7 @@ void socket_loop(const pid_t pid, const int sock) {
 
         if (pid == 0) {
             //Decrypt
-            modified_data = decrypt_data(buffer, size, key, nonce, NULL, 0);
+            modified_data = decrypt_data(buffer, size, key, NULL, 0);
             if (modified_data) {
                 write(conn_sock, modified_data, size - TAG_LEN);
             } else {
@@ -135,12 +140,13 @@ void socket_loop(const pid_t pid, const int sock) {
             }
         } else {
             //Encrypt
-            modified_data = encrypt_data(buffer, size, key, nonce, NULL, 0);
+            modified_data = encrypt_data(buffer, size, key, NULL, 0);
             write(conn_sock, modified_data, size + TAG_LEN);
         }
 
         free(modified_data);
 
+#if 0
         //Increment the nonce after a successful write
         for (int i = NONCE_LEN - 1; i >= 0; --i) {
             if (nonce[i] == UCHAR_MAX) {
@@ -154,6 +160,7 @@ void socket_loop(const pid_t pid, const int sock) {
                 break;
             }
         }
+#endif
     }
     close(conn_sock);
 }
@@ -171,11 +178,9 @@ int main(void) {
 
     const char* aad = "Goodbye World";
 
-    unsigned char* ciphertext = encrypt_data(mesg, 32, key, nonce,
-            NULL, 0);
+    unsigned char* ciphertext = encrypt_data(mesg, 32, key, NULL, 0);
 
-    unsigned char* plaintext = decrypt_data(
-            ciphertext, 32 + TAG_LEN, key, nonce, NULL, 0);
+    unsigned char* plaintext = decrypt_data(ciphertext, 32 + TAG_LEN + NONCE_LEN, key, NULL, 0);
 
     if (plaintext && memcmp(mesg, plaintext, 32) == 0) {
         puts("Encryption works fine");
@@ -262,4 +267,3 @@ int main(void) {
 
     return EXIT_SUCCESS;
 }
-
