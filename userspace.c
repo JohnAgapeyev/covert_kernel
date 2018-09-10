@@ -3,6 +3,7 @@
 #include <linux/netlink.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -15,6 +16,12 @@
 #define NONCE_LEN 12
 #define KEY_LEN 16
 #define MAX_PAYLOAD 1024
+
+#define SYMMETRIC_KEY_SIZE 16
+#define IV_SIZE 16
+#define BLOCK_SIZE 16
+#define TAG_SIZE 16
+#define HASH_SIZE 32
 
 #define libcrypto_error() \
     do { \
@@ -152,8 +159,8 @@ void socket_loop(const pid_t pid, const int sock) {
             }
             printf("\n");
             //Decrypt
-            //modified_data = decrypt_data(buffer, size, key, nonce, NULL, 0);
-            ssize_t res = decrypt_aead(buffer, size, NULL, 0, key, nonce, modified_data);
+            modified_data = decrypt_data(buffer, size, key, nonce, NULL, 0);
+            //ssize_t res = decrypt_aead(buffer, size, NULL, 0, key, nonce, modified_data);
             if (modified_data) {
                 write(conn_sock, modified_data, size - TAG_LEN);
             } else {
@@ -201,7 +208,7 @@ void socket_loop(const pid_t pid, const int sock) {
 }
 
 int main(void) {
-#if 0
+#if 1
     unsigned char mesg[32];
     memset(mesg, 'A', 32);
 
@@ -213,6 +220,7 @@ int main(void) {
 
     const char* aad = "Goodbye World";
 
+#if 0
     unsigned char* ciphertext = encrypt_data(mesg, 32, key, nonce,
             NULL, 0);
 
@@ -224,6 +232,65 @@ int main(void) {
     } else {
         puts("Encryption FAILED");
     }
+#else
+    const unsigned char* testString = (const unsigned char*) "Hello world";
+    size_t testStringLen = strlen(testString);
+
+    unsigned char testKey[SYMMETRIC_KEY_SIZE];
+    unsigned char testIV[IV_SIZE];
+    unsigned char testaad[IV_SIZE];
+
+    memset(testKey, 0xae, SYMMETRIC_KEY_SIZE);
+    memset(testIV, 0xae, IV_SIZE);
+    memset(testaad, 0xae, IV_SIZE);
+
+    unsigned char ciphertxt[testStringLen];
+    unsigned char tag[BLOCK_SIZE];
+
+    size_t cipherLen = encrypt_aead(
+            testString, testStringLen, testaad, IV_SIZE, testKey, testIV, ciphertxt, tag);
+
+    unsigned char plaintext[testStringLen + 1];
+
+    ssize_t plainLen
+            = decrypt_aead(ciphertxt, cipherLen, testaad, IV_SIZE, testKey, testIV, tag, plaintext);
+
+    plaintext[testStringLen] = '\0';
+
+    bool rtn = (strcmp((char*) plaintext, (char*) testString) == 0);
+
+    //Modification
+    testaad[0] ^= 1;
+    testaad[1] &= 1;
+    testaad[2] += 1;
+
+    plainLen
+            = decrypt_aead(ciphertxt, cipherLen, testaad, IV_SIZE, testKey, testIV, tag, plaintext);
+    if (plainLen == -1) {
+        puts("Encryption works!");
+    } else {
+        puts("Encryption FAILS!");
+    }
+
+#if 0
+    unsigned char ciphertext[100];
+
+    unsigned char plaintext[100];
+
+    unsigned char tag[100];
+
+    size_t l = encrypt_aead(mesg, 32, (const unsigned char*) aad, strlen(aad), key, nonce, ciphertext, tag);
+    printf("Len %zu\n", l);
+
+    if (decrypt_aead(ciphertext, 32, (const unsigned char*) aad, strlen(aad), key, nonce, tag, plaintext)
+            && memcmp(mesg, plaintext, 32) == 0) {
+        puts("Encryption works fine");
+    } else {
+        puts("Encryption FAILED");
+    }
+#endif
+#endif
+
 #else
 
     //Daemonize
