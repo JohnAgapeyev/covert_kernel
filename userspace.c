@@ -100,8 +100,6 @@ unsigned char* decrypt_data(unsigned char* message, const size_t mesg_len, const
         return NULL;
     }
 
-    printf("Decrypt len %d\n", len);
-
     if (!EVP_DecryptFinal_ex(ctx, plaintext + len, &len)) {
         puts("Decrypt call failure");
         return NULL;
@@ -128,49 +126,16 @@ void socket_loop(const pid_t pid, const int sock) {
         unsigned char* modified_data;
 
         if (pid == 0) {
-            fprintf(stderr, "Decrypt Key %.*s\nNonce %.*s\n", KEY_LEN, key, NONCE_LEN, nonce);
-            puts("Key:");
-            for (int i = 0; i < KEY_LEN; ++i) {
-                printf("%02x", key[i]);
-            }
-            printf("\n");
-            puts("Nonce:");
-            for (int i = 0; i < NONCE_LEN; ++i) {
-                printf("%02x", nonce[i]);
-            }
-            printf("\n");
-            puts("Data:");
-            for (int i = 0; i < size; ++i) {
-                printf("%02x", buffer[i]);
-            }
-            printf("\n");
             //Decrypt
             modified_data = decrypt_data(buffer, size, key, nonce, NULL, 0);
-            //ssize_t res = decrypt_aead(buffer, size, NULL, 0, key, nonce, modified_data);
             if (modified_data) {
                 write(conn_sock, modified_data, size - TAG_LEN);
             } else {
                 fprintf(stderr, "Data failed to decrypt\n");
             }
         } else {
-            fprintf(stderr, "Encrypt Key %.*s\nNonce %.*s\n", KEY_LEN, key, NONCE_LEN, nonce);
             //Encrypt
             modified_data = encrypt_data(buffer, size, key, nonce, NULL, 0);
-            puts("Key:");
-            for (int i = 0; i < KEY_LEN; ++i) {
-                printf("%02x", key[i]);
-            }
-            printf("\n");
-            puts("Nonce:");
-            for (int i = 0; i < NONCE_LEN; ++i) {
-                printf("%02x", nonce[i]);
-            }
-            printf("\n");
-            puts("Data:");
-            for (int i = 0; i < size + TAG_LEN; ++i) {
-                printf("%02x", modified_data[i]);
-            }
-            printf("\n");
             write(conn_sock, modified_data, size + TAG_LEN);
         }
 

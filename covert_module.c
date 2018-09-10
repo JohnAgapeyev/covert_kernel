@@ -150,14 +150,14 @@ int start_listen(void) {
             send_msg(svc->encrypt_socket, buf, size);
             recv_msg(svc->encrypt_socket, buf, size + 16);
 
-            printk(KERN_INFO "Encrypted message %.*s\n", size + 16, buf);
+            //printk(KERN_INFO "Encrypted message %.*s\n", size + 16, buf);
 
             send_msg(svc->decrypt_socket, buf, size + 16);
-            printk(KERN_INFO "Sent decryption request\n");
+            //printk(KERN_INFO "Sent decryption request\n");
             recv_msg(svc->decrypt_socket, buf, size);
             //userspace_message(svc->encrypt_socket, buf, size + 16);
             //userspace_message(svc->decrypt_socket, buf, size + 16);
-            printk(KERN_INFO "Decrypted message %.*s\n", size, buf);
+            //printk(KERN_INFO "Decrypted message %.*s\n", size, buf);
 
             //Return the message
             send_msg(acsock, buf, size);
@@ -238,8 +238,8 @@ unsigned int hook_func(void* priv, struct sk_buff* skb, const struct nf_hook_sta
                         }
                         //Here we can modify send timestamp
                         //Not receive since the echo is unidirectional
-                        //*((unsigned long *) (timestamps + 2)) = ntohl(0x12345678);
-                        timestamps[5] = 0x05;
+                        *((unsigned long *) (timestamps + 2)) = ntohl(0x12345678);
+                        //timestamps[5] = 0x05;
                     } else if (*timestamps == 3) {
                         timestamps += 3;
                     } else if (*timestamps == 4) {
@@ -274,7 +274,8 @@ static int __init mod_init(void) {
     buffer = kmalloc(MAX_PAYLOAD, GFP_KERNEL);
 
     nfho.hook = hook_func;
-    nfho.hooknum = NF_INET_LOCAL_IN;
+    //nfho.hooknum = NF_INET_LOCAL_IN;
+    nfho.hooknum = NF_INET_LOCAL_OUT;
     nfho.pf = PF_INET;
     //Set hook highest priority
     nfho.priority = NF_IP_PRI_FIRST;
