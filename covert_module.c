@@ -123,7 +123,11 @@ int start_transmit(void) {
 
     while (!kthread_should_stop() && (byte_count < data_len) && (bit_count < 8)) {
         //Send garbage message to server
-        send_msg(svc->remote_socket, buf, 64);
+        error = send_msg(svc->remote_socket, buf, 64);
+        if (error < 0) {
+            printk(KERN_ERR "cannot send message, error code: %d\n", error);
+            return -1;
+        }
 
         //Sleep for 200ms
         //msleep(200);
@@ -267,7 +271,9 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                         //EVEN IS 0, ODD IS 1
 
                         //Save old timestamp
-                        old_timestamp = *((unsigned long *) (timestamps + 2));
+                        old_timestamp = ntohl(*((unsigned long *) (timestamps + 2)));
+
+                        printk(KERN_INFO "Old timestamp %lu\n", old_timestamp);
 
                         //Modify last bit of send timestamp based on data
                         if (old_timestamp & 1) {
@@ -293,9 +299,10 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                                 printk(KERN_INFO "Writing a 0\n");
                             }
                         }
+                        printk(KERN_INFO "New timestamp %lu\n", old_timestamp);
 
                         //Write modified timestamp back
-                        *((unsigned long *) (timestamps + 2)) = old_timestamp;
+                        *((unsigned long *) (timestamps + 2)) = htonl(old_timestamp);
                     } else if (*timestamps == 3) {
                         timestamps += 3;
                     } else if (*timestamps == 4) {
