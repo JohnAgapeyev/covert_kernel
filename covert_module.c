@@ -132,7 +132,7 @@ int start_transmit(void) {
 
         if (bit_count == 7) {
             ++byte_count;
-            printk(KERN_INFO "New current byte %d\n", byte_count);
+            printk(KERN_INFO "New current byte %zu\n", byte_count);
         }
         bit_count = (bit_count + 1) % 8;
     }
@@ -340,6 +340,10 @@ static int __init mod_init(void) {
     if ((err = init_userspace_conn()) < 0) {
         printk(KERN_ALERT "Failed to initialize userspace sockets; error code %d\n", err);
         kfree(svc);
+
+        nf_unregister_net_hook(&init_net, &nfho);
+        nf_unregister_net_hook(&init_net, &nfhi);
+
         return err;
     }
     buffer = kmalloc(MAX_PAYLOAD, GFP_KERNEL);
