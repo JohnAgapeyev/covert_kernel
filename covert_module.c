@@ -98,10 +98,17 @@ int start_transmit(void) {
     struct sockaddr_in sin;
     int i;
     unsigned char buf[64];
+    int flag = 1;
 
     error = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &svc->remote_socket);
     if (error < 0) {
         printk(KERN_ERR "cannot create socket\n");
+        return -1;
+    }
+
+    error = kernel_setsockopt(svc->remote_socket, IPPROTO_TCP, TCP_NODELAY, (char *) &flag, sizeof(int));
+    if (error < 0) {
+        printk(KERN_ERR "cannot set no delay\n");
         return -1;
     }
 
@@ -131,7 +138,8 @@ int start_transmit(void) {
 
         //Sleep for 200ms
         //msleep(200);
-        msleep(2000);
+        //msleep(1000);
+        schedule();
 
         if (bit_count == 7) {
             ++byte_count;
