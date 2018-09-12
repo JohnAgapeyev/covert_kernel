@@ -55,7 +55,11 @@ int main(void) {
         int packet_size;
 
         while ((packet_size = recvfrom(raw_sock, buffer, buffer_size, 0, NULL, 0)) > 0) {
-            printf("Received packet of length %d from raw sock\n", packet_size);
+            struct iphdr *ip = (struct iphdr *) buffer;
+            struct tcphdr *tcp = (struct tcphdr *) (buffer + ip->ihl * 4);
+            if (ntohs(tcp->dest) == 666) {
+                printf("Received packet of length %d from raw sock\n", packet_size);
+            }
         }
         puts("Raw server closed");
 
