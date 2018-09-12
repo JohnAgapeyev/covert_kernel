@@ -59,10 +59,6 @@ int recv_msg(struct socket* sock, unsigned char* buf, size_t len) {
 
     size = kernel_recvmsg(sock, &msg, &iov, 1, len, msg.msg_flags);
 
-    if (size > 0) {
-        printk(KERN_ALERT "the message is : %.*s\n", size, buf);
-    }
-
     return size;
 }
 
@@ -84,10 +80,6 @@ int send_msg(struct socket* sock, unsigned char* buf, size_t len) {
     msg.msg_namelen = 0;
 
     size = kernel_sendmsg(sock, &msg, &iov, 1, len);
-
-    if (size > 0) {
-        printk(KERN_INFO "message sent!\n");
-    }
 
     return size;
 }
@@ -136,12 +128,11 @@ int start_transmit(void) {
         }
 
         //Sleep for 200ms
-        //msleep(200);
-        //msleep(1000);
-        schedule();
+        msleep(200);
 
         if (bit_count == 7) {
             ++byte_count;
+            printk(KERN_INFO "New current byte %d\n", byte_count);
         }
         bit_count = (bit_count + 1) % 8;
     }
@@ -268,7 +259,6 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                         //NOP
                         ++timestamps;
                     } else if (*timestamps == 8) {
-                        printk(KERN_INFO "Timestamp option\n");
                         //Timestamp option
                         if (timestamps[1] != 10) {
                             printk(KERN_INFO "Timestamp option was malformed\n");
