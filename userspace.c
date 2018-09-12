@@ -148,10 +148,8 @@ unsigned char* decrypt_data(unsigned char* message, const size_t mesg_len, const
 void socket_loop(const pid_t pid, const int sock) {
     unsigned char buffer[MAX_PAYLOAD];
     unsigned char key[KEY_LEN];
-    //unsigned char nonce[NONCE_LEN];
 
     memset(key, 0xab, KEY_LEN);
-    //memset(nonce, 0, NONCE_LEN);
 
     int conn_sock = accept(sock, NULL, 0);
 
@@ -164,33 +162,17 @@ void socket_loop(const pid_t pid, const int sock) {
             //Decrypt
             modified_data = decrypt_data(buffer, size, key, NULL, 0);
             if (modified_data) {
-                write(conn_sock, modified_data, size - TAG_LEN);
+                write(conn_sock, modified_data, size - TAG_LEN - NONCE_LEN);
             } else {
                 fprintf(stderr, "Data failed to decrypt\n");
             }
         } else {
             //Encrypt
             modified_data = encrypt_data(buffer, size, key, NULL, 0);
-            write(conn_sock, modified_data, size + TAG_LEN);
+            write(conn_sock, modified_data, size + TAG_LEN + NONCE_LEN);
         }
 
         free(modified_data);
-
-#if 0
-        //Increment the nonce after a successful write
-        for (int i = NONCE_LEN - 1; i >= 0; --i) {
-            if (nonce[i] == UCHAR_MAX) {
-                if (i == 0) {
-                    fprintf(stderr, "NONCE WRAPPED AROUND\n");
-                    abort();
-                }
-                continue;
-            } else {
-                ++nonce[i];
-                break;
-            }
-        }
-#endif
     }
     close(conn_sock);
 }
