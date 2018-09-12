@@ -79,8 +79,16 @@ int main(void) {
                                 continue;
                             }
                             //EVEN IS 0, ODD IS 1
-                            unsigned long timestamp_val = ntohl(*((unsigned long*) (timestamps + 2)));
+                            unsigned long timestamp_val
+                                    = ntohl(*((unsigned long*) (timestamps + 2)));
                             printf("Received timestamp with value %lu\n", timestamp_val);
+                            if (timestamp_val & 1) {
+                                //Odd
+                                printf("Timestamp is a 1\n");
+                            } else {
+                                //Even
+                                printf("Timestamp is a 0\n");
+                            }
                             break;
                         } else if (*timestamps == 3) {
                             timestamps += 3;
