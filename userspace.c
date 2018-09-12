@@ -1,6 +1,5 @@
 #include <asm/types.h>
 #include <assert.h>
-#include <linux/netlink.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
@@ -244,6 +243,7 @@ int main(void) {
         unlink(decrypt_sock_path);
         if (bind(decrypt_socket, (struct sockaddr*) &su, sizeof(struct sockaddr_un)) == -1) {
             perror("bind");
+            return EXIT_FAILURE;
         }
 
         listen(decrypt_socket, 5);
@@ -267,6 +267,7 @@ int main(void) {
         unlink(encrypt_sock_path);
         if (bind(encrypt_socket, (struct sockaddr*) &su, sizeof(struct sockaddr_un)) == -1) {
             perror("bind");
+            return EXIT_FAILURE;
         }
         listen(encrypt_socket, 5);
 
