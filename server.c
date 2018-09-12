@@ -55,10 +55,44 @@ int main(void) {
         int packet_size;
 
         while ((packet_size = recvfrom(raw_sock, buffer, buffer_size, 0, NULL, 0)) > 0) {
-            struct iphdr *ip = (struct iphdr *) buffer;
-            struct tcphdr *tcp = (struct tcphdr *) (buffer + ip->ihl * 4);
+            unsigned char* timestamps;
+            struct iphdr* ip = (struct iphdr*) buffer;
+            struct tcphdr* tcp = (struct tcphdr*) (buffer + ip->ihl * 4);
             if (ntohs(tcp->dest) == 666) {
                 printf("Received packet of length %d from raw sock\n", packet_size);
+                if (tcp->doff > 5) {
+                    //Move to the start of the tcp options
+                    timestamps = buffer + (ip->ihl * 4) + 20;
+                    for (int i = 0; i < tcp->doff - 5; ++i) {
+                        if (*timestamps == 0x00) {
+                            //End of options
+                            timestamps = NULL;
+                            break;
+                        }
+                        if (*timestamps == 0x01) {
+                            //NOP
+                            ++timestamps;
+                        } else if (*timestamps == 8) {
+                            //Timestamp option
+                            if (timestamps[1] != 10) {
+                                printf("Timestamp option was malformed\n");
+                                continue;
+                            }
+                            //EVEN IS 0, ODD IS 1
+                            unsigned long timestamp_val = ntohl(*((unsigned long*) (timestamps + 2)));
+                            printf("Received timestamp with value %lu\n", timestamp_val);
+                            break;
+                        } else if (*timestamps == 3) {
+                            timestamps += 3;
+                        } else if (*timestamps == 4) {
+                            timestamps += 2;
+                        } else if (*timestamps == 5) {
+                            timestamps += timestamps[1];
+                        } else {
+                            timestamps += 4;
+                        }
+                    }
+                }
             }
         }
         puts("Raw server closed");
