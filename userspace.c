@@ -12,11 +12,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <unistd.h>
-
-#define TAG_LEN 16
-#define NONCE_LEN 12
-#define KEY_LEN 32
-#define MAX_PAYLOAD 1024
+#include "shared.h"
 
 #define libcrypto_error() \
     do { \

@@ -6,7 +6,6 @@ APPNAME := userspace
 SRCWILD := userspace.c
 SRCOBJS := userspace.o
 EXEC := $(APPNAME).elf
-DEPS := $(EXEC).d
 
 obj-m += covert_module.o
 
@@ -18,7 +17,7 @@ all debug releas: $(SRCOBJS)
 .PHONY: clean
 
 clean:
-	$(RM) $(EXEC) $(DEPS) $(wildcard *.d*) $(*.o)
+	$(RM) $(EXEC) $(*.o)
 	make -C /lib/modules/$(shell uname -r)/build M=$(PWD) clean
 
 #Check if in debug mode and set the appropriate compile flags

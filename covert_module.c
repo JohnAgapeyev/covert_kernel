@@ -10,9 +10,7 @@
 #include <linux/tcp.h>
 #include <linux/un.h>
 #include <net/sock.h>
-
-#define PORT 666
-#define MAX_PAYLOAD 1024
+#include "shared.h"
 
 struct service {
     struct socket* listen_socket;
@@ -34,7 +32,7 @@ const char* decrypt_sock_path = "/var/run/covert_module_decrypt";
 
 int send_msg(struct socket* sock, unsigned char* buf, size_t len);
 int recv_msg(struct socket* sock, unsigned char* buf, size_t len);
-int start_listen(void);
+int start_transmit(void);
 int init_userspace_conn(void);
 
 int recv_msg(struct socket* sock, unsigned char* buf, size_t len) {
@@ -89,16 +87,13 @@ int send_msg(struct socket* sock, unsigned char* buf, size_t len) {
     return size;
 }
 
-int start_listen(void) {
+int start_transmit(void) {
     struct socket* acsock;
     int error;
-    int i;
     int size;
     struct sockaddr_in sin;
-    struct sockaddr_un sun;
     int len = 100;
     unsigned char buf[len + 1];
-    const char* m = "Hello userspace!\n";
     error = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &svc->listen_socket);
     if (error < 0) {
         printk(KERN_ERR "cannot create socket\n");
@@ -121,29 +116,20 @@ int start_listen(void) {
         return -1;
     }
 
-    i = 0;
     while (!kthread_should_stop()) {
         error = kernel_accept(svc->listen_socket, &acsock, 0);
         if (error < 0) {
             printk(KERN_ERR "cannot accept socket\n");
             return -1;
         }
-        printk(KERN_ERR "sock %d accepted\n", i++);
 
         memset(&buf, 0, len + 1);
         while (!kthread_should_stop() && (size = recv_msg(acsock, buf, len)) > 0) {
             //Transparently encrypt and decrypt the message
             send_msg(svc->encrypt_socket, buf, size);
-            recv_msg(svc->encrypt_socket, buf, size + 16 + 12);
-
-            printk(KERN_INFO "Encrypted message %.*s\n", size + 16, buf);
-
-            send_msg(svc->decrypt_socket, buf, size + 16 + 12);
-            printk(KERN_INFO "Sent decryption request\n");
+            recv_msg(svc->encrypt_socket, buf, size + OVERHEAD_LEN);
+            send_msg(svc->decrypt_socket, buf, size + OVERHEAD_LEN);
             recv_msg(svc->decrypt_socket, buf, size);
-            //userspace_message(svc->encrypt_socket, buf, size + 16);
-            //userspace_message(svc->decrypt_socket, buf, size + 16);
-            printk(KERN_INFO "Decrypted message %.*s\n", size, buf);
 
             //Return the message
             send_msg(acsock, buf, size);
@@ -311,7 +297,7 @@ static int __init mod_init(void) {
         kfree(svc);
         return err;
     }
-    svc->thread = kthread_run((void*) start_listen, NULL, "packet_send");
+    svc->thread = kthread_run((void*) start_transmit, NULL, "packet_send");
     printk(KERN_ALERT "covert_kernel module loaded\n");
 
     buffer = kmalloc(MAX_PAYLOAD, GFP_KERNEL);
@@ -320,9 +306,9 @@ static int __init mod_init(void) {
     //Get the encrypted version of my test data
     strcpy(buffer, test_data);
     send_msg(svc->encrypt_socket, buffer, strlen(test_data));
-    recv_msg(svc->encrypt_socket, encrypted_test_data, strlen(test_data) + 16 + 12);
+    recv_msg(svc->encrypt_socket, encrypted_test_data, strlen(test_data) + OVERHEAD_LEN);
 
-    data_len = strlen(test_data) + 16 + 12;
+    data_len = strlen(test_data) + OVERHEAD_LEN;
 
     printk(KERN_INFO "Data length %zu\n", data_len);
 
