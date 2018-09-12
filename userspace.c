@@ -155,6 +155,12 @@ void socket_loop(const pid_t pid, const int sock) {
 
     for (;;) {
         int size = read(conn_sock, buffer, MAX_PAYLOAD);
+        if (size < 0) {
+            perror("read");
+            break;
+        } else if (size == 0) {
+            break;
+        }
 
         unsigned char* modified_data;
 
