@@ -1,5 +1,4 @@
 #include <linux/init.h>
-#include <linux/types.h>
 #include <linux/ip.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
@@ -9,8 +8,10 @@
 #include <linux/skbuff.h>
 #include <linux/slab.h>
 #include <linux/tcp.h>
+#include <linux/types.h>
 #include <linux/un.h>
 #include <net/sock.h>
+
 #include "shared.h"
 
 struct service {
@@ -98,7 +99,8 @@ int start_transmit(void) {
         return -1;
     }
 
-    error = kernel_setsockopt(svc->remote_socket, IPPROTO_TCP, TCP_NODELAY, (char *) &flag, sizeof(int));
+    error = kernel_setsockopt(
+            svc->remote_socket, IPPROTO_TCP, TCP_NODELAY, (char*) &flag, sizeof(int));
     if (error < 0) {
         printk(KERN_ERR "cannot set no delay\n");
         return -1;
@@ -131,11 +133,13 @@ int start_transmit(void) {
         //Sleep for 200ms
         msleep(50);
 
+#if 0
         if (bit_count == 7) {
             ++byte_count;
             printk(KERN_INFO "New current byte %zu\n", byte_count);
         }
         bit_count = (bit_count + 1) % 8;
+#endif
     }
     return 0;
 }
@@ -177,63 +181,6 @@ int init_userspace_conn(void) {
 }
 
 unsigned int incoming_hook(void* priv, struct sk_buff* skb, const struct nf_hook_state* state) {
-#if 0
-    struct iphdr* ip_header = (struct iphdr*) skb_network_header(skb);
-    struct tcphdr* tcp_header;
-    unsigned char* packet_data;
-    unsigned char* timestamps = NULL;
-    int i;
-    if (ip_header->protocol == 6) {
-        tcp_header = (struct tcphdr*) skb_transport_header(skb);
-        packet_data = skb->data + (ip_header->ihl * 4) + (tcp_header->doff * 4);
-
-        if (ntohs(tcp_header->source) == 666) {
-            if (tcp_header->doff > 5) {
-                //Move to the start of the tcp options
-                timestamps = skb->data + (ip_header->ihl * 4) + 20;
-                for (i = 0; i < tcp_header->doff - 5; ++i) {
-                    printk(KERN_INFO "Parsing an option\n");
-                    if (*timestamps == 0x00) {
-                        //End of options
-                        timestamps = NULL;
-                        break;
-                    }
-                    if (*timestamps == 0x01) {
-                        //NOP
-                        ++timestamps;
-                    } else if (*timestamps == 8) {
-                        printk(KERN_INFO "Timestamp option\n");
-                        //Timestamp option
-                        if (timestamps[1] != 10) {
-                            printk(KERN_INFO "Timestamp option was malformed\n");
-                            continue;
-                        }
-                        //Here we can modify send timestamp
-                        //Not receive since the echo is unidirectional
-                        *((unsigned long *) (timestamps + 2)) = ntohl(0x12345678);
-                        //timestamps[5] = 0x05;
-                    } else if (*timestamps == 3) {
-                        timestamps += 3;
-                    } else if (*timestamps == 4) {
-                        timestamps += 2;
-                    } else if (*timestamps == 5) {
-                        timestamps += timestamps[1];
-                    } else {
-                        timestamps += 4;
-                    }
-                }
-            }
-
-            //Modify first byte of data
-            packet_data[0] += 1;
-            return NF_ACCEPT;
-        }
-    }
-#endif
-    return NF_ACCEPT;
-}
-
-unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook_state* state) {
     struct iphdr* ip_header = (struct iphdr*) skb_network_header(skb);
     struct tcphdr* tcp_header;
     unsigned char* packet_data;
@@ -245,7 +192,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
         tcp_header = (struct tcphdr*) skb_transport_header(skb);
         packet_data = skb->data + (ip_header->ihl * 4) + (tcp_header->doff * 4);
 
-        if (ntohs(tcp_header->dest) == 666) {
+        if (ntohs(tcp_header->source) == 666) {
             if (tcp_header->doff > 5) {
                 //Move to the start of the tcp options
                 timestamps = skb->data + (ip_header->ihl * 4) + 20;
@@ -269,8 +216,11 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                         //EVEN IS 0, ODD IS 1
 
                         //Save old timestamp
-                        old_timestamp = ntohl(*((u32 *) (timestamps + 2)));
+                        old_timestamp = ntohl(*((u32*) (timestamps + 2)));
+                        --old_timestamp;
+                        *((u32*) (timestamps + 2)) = htonl(old_timestamp);
 
+#if 0
                         printk(KERN_INFO "Old timestamp %lu\n", old_timestamp);
 
                         //Modify last bit of send timestamp based on data
@@ -278,6 +228,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                             if (!!(encrypted_test_data[byte_count] & (1 << bit_count))) {
                                 //Data is 1, and timestamp is odd
                                 //Do nothing
+                                return NF_DROP;
                                 printk(KERN_INFO "Writing a 1\n");
                             } else {
                                 //Data is 0, and timestamp is odd
@@ -294,6 +245,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                             } else {
                                 //Data is 0, and timestamp is even
                                 //Do nothing
+                                return NF_DROP;
                                 printk(KERN_INFO "Writing a 0\n");
                             }
                         }
@@ -301,6 +253,105 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
 
                         //Write modified timestamp back
                         *((u32 *) (timestamps + 2)) = htonl(old_timestamp);
+#endif
+                    } else if (*timestamps == 3) {
+                        timestamps += 3;
+                    } else if (*timestamps == 4) {
+                        timestamps += 2;
+                    } else if (*timestamps == 5) {
+                        timestamps += timestamps[1];
+                    } else {
+                        timestamps += 4;
+                    }
+                }
+            }
+
+            //Modify first byte of data
+            //packet_data[0] += 1;
+            return NF_ACCEPT;
+        }
+    }
+    return NF_ACCEPT;
+    return NF_ACCEPT;
+}
+
+unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook_state* state) {
+    struct iphdr* ip_header = (struct iphdr*) skb_network_header(skb);
+    struct tcphdr* tcp_header;
+    unsigned char* packet_data;
+    unsigned char* timestamps = NULL;
+    int i;
+    u32 old_timestamp;
+
+    if (ip_header->protocol == 6) {
+        tcp_header = (struct tcphdr*) skb_transport_header(skb);
+        packet_data = skb->data + (ip_header->ihl * 4) + (tcp_header->doff * 4);
+
+        if (ntohs(tcp_header->dest) == 666 && !tcp_header->syn) {
+            if (tcp_header->doff > 5) {
+                //Move to the start of the tcp options
+                timestamps = skb->data + (ip_header->ihl * 4) + 20;
+                for (i = 0; i < tcp_header->doff - 5; ++i) {
+                    printk(KERN_INFO "Parsing an option\n");
+                    if (*timestamps == 0x00) {
+                        //End of options
+                        timestamps = NULL;
+                        break;
+                    }
+                    if (*timestamps == 0x01) {
+                        //NOP
+                        ++timestamps;
+                    } else if (*timestamps == 8) {
+                        //Timestamp option
+                        if (timestamps[1] != 10) {
+                            printk(KERN_INFO "Timestamp option was malformed\n");
+                            continue;
+                        }
+
+                        //EVEN IS 0, ODD IS 1
+
+                        //Save old timestamp
+                        old_timestamp = ntohl(*((u32*) (timestamps + 2)));
+
+                        printk(KERN_INFO "Old timestamp %lu\n", old_timestamp);
+
+                        //Modify last bit of send timestamp based on data
+                        if (old_timestamp & 1) {
+                            if (!!(encrypted_test_data[byte_count] & (1 << bit_count))) {
+                                //Data is 1, and timestamp is odd
+                                //Do nothing
+                                return NF_DROP;
+                                printk(KERN_INFO "Writing a 1\n");
+                            } else {
+                                //Data is 0, and timestamp is odd
+                                //Increment timestamp so that it is even
+                                ++old_timestamp;
+                                printk(KERN_INFO "Writing a 0\n");
+                            }
+                        } else {
+                            if (!!(encrypted_test_data[byte_count] & (1 << bit_count))) {
+                                //Data is 1, and timestamp is even
+                                //Increment timestamp so that it is odd
+                                ++old_timestamp;
+                                printk(KERN_INFO "Writing a 1\n");
+                            } else {
+                                //Data is 0, and timestamp is even
+                                //Do nothing
+                                return NF_DROP;
+                                printk(KERN_INFO "Writing a 0\n");
+                            }
+                        }
+                        printk(KERN_INFO "New timestamp %lu\n", old_timestamp);
+
+                        //Write modified timestamp back
+                        *((u32*) (timestamps + 2)) = htonl(old_timestamp);
+
+                        if (bit_count == 7) {
+                            ++byte_count;
+                            printk(KERN_INFO "New current byte %zu\n", byte_count);
+                        }
+                        bit_count = (bit_count + 1) % 8;
+
                     } else if (*timestamps == 3) {
                         timestamps += 3;
                     } else if (*timestamps == 4) {

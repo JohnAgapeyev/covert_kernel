@@ -66,7 +66,7 @@ int main(void) {
             unsigned char* timestamps;
             struct iphdr* ip = (struct iphdr*) buffer;
             struct tcphdr* tcp = (struct tcphdr*) (buffer + ip->ihl * 4);
-            if (ntohs(tcp->dest) == 666) {
+            if (ntohs(tcp->dest) == 666 && !tcp->syn) {
                 //printf("Received packet of length %d from raw sock\n", packet_size);
                 if (tcp->doff > 5) {
                     //Move to the start of the tcp options
@@ -93,11 +93,11 @@ int main(void) {
                             if (timestamp_val & 1) {
                                 //Odd
                                 printf("Timestamp is a 1\n");
-                                covert_buffer[byte_count] &= ~(1 << bit_count);
+                                covert_buffer[byte_count] |= (1 << bit_count);
                             } else {
                                 //Even
                                 printf("Timestamp is a 0\n");
-                                covert_buffer[byte_count] |= (1 << bit_count);
+                                covert_buffer[byte_count] &= ~(1 << bit_count);
                             }
 
 
