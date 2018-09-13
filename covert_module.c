@@ -92,6 +92,7 @@ int start_transmit(void) {
     struct sockaddr_in sin;
     int i;
     int flag = 1;
+    u8 sleep_len;
 
     error = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &svc->remote_socket);
     if (error < 0) {
@@ -130,8 +131,11 @@ int start_transmit(void) {
             return -1;
         }
 
+        get_random_bytes(&sleep_len, sizeof(u8));
+        sleep_len %= 500;
+
         //Sleep for 200ms
-        msleep(50);
+        msleep(sleep_len);
 
 #if 0
         if (bit_count == 7) {
