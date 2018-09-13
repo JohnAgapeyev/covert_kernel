@@ -15,10 +15,12 @@
 #include <unistd.h>
 
 #include "shared.h"
+#include "crypto.h"
 
 static int byte_count = 0;
 static int bit_count = 0;
 static unsigned char covert_buffer[MAX_PAYLOAD];
+static unsigned char key[KEY_LEN];
 
 int main(void) {
     //Daemonize
@@ -47,6 +49,8 @@ int main(void) {
             //Parent
             break;
     }
+
+    memset(key, 0xab, KEY_LEN);
 
     if (pid == 0) {
         //Raw
@@ -89,17 +93,23 @@ int main(void) {
                             if (timestamp_val & 1) {
                                 //Odd
                                 printf("Timestamp is a 1\n");
+                                covert_buffer[byte_count] &= ~(1 << bit_count);
                             } else {
                                 //Even
                                 printf("Timestamp is a 0\n");
+                                covert_buffer[byte_count] |= (1 << bit_count);
                             }
 
-                            covert_buffer[byte_count] |= (1 << bit_count);
+
+                            printf("Location %d %d\n", byte_count, bit_count);
 
                             if (bit_count == 7) {
                                 ++byte_count;
                                 if (byte_count >= MAX_PAYLOAD) {
                                     printf("Time to decrypt\n");
+                                    unsigned char *plaintext = decrypt_data(covert_buffer, MAX_PAYLOAD, key, NULL, 0);
+                                    printf("Received message: %.*s\n", MAX_USER_DATA, plaintext);
+                                    free(plaintext);
                                     byte_count = 0;
                                 }
                             }
