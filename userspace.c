@@ -1,9 +1,14 @@
 #include <asm/types.h>
 #include <assert.h>
+#include <linux/tcp.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
+#include <openssl/ssl.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -106,29 +111,113 @@ int main(void) {
     memset(secret_key, 0xab, KEY_LEN);
 
     if (pid == 0) {
-        //Decrypt
-        const char* decrypt_sock_path = "/var/run/covert_module_decrypt";
+        switch ((pid = fork())) {
+            case 0: {
+                //TLS
 
-        int decrypt_socket = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+                init_openssl();
+                SSL_CTX* ctx = create_context();
+                configure_context(ctx);
 
-        struct sockaddr_un su;
-        memset(&su, 0, sizeof(struct sockaddr_un));
-        su.sun_family = AF_UNIX;
-        strcpy(su.sun_path, decrypt_sock_path);
+                const char* tls_sock_path = "/var/run/covert_module_tls";
+                int local_tls_socket = socket(AF_UNIX, SOCK_SEQPACKET, 0);
 
-        unlink(decrypt_sock_path);
-        if (bind(decrypt_socket, (struct sockaddr*) &su, sizeof(struct sockaddr_un)) == -1) {
-            perror("bind");
-            return EXIT_FAILURE;
+                struct sockaddr_un su;
+                memset(&su, 0, sizeof(struct sockaddr_un));
+                su.sun_family = AF_UNIX;
+                strcpy(su.sun_path, tls_sock_path);
+
+                unlink(tls_sock_path);
+                if (bind(local_tls_socket, (struct sockaddr*) &su, sizeof(struct sockaddr_un))
+                        == -1) {
+                    perror("bind");
+                    return EXIT_FAILURE;
+                }
+
+                listen(local_tls_socket, 5);
+
+                unsigned char buffer[MAX_PAYLOAD];
+
+                int conn_sock = accept(local_tls_socket, NULL, 0);
+
+                int remote_sock = socket(AF_INET, SOCK_STREAM, 0);
+
+                struct sockaddr_in sin;
+                sin.sin_addr.s_addr = SERVER_IP;
+                sin.sin_family = AF_INET;
+                sin.sin_port = htons(PORT);
+
+                if (connect(remote_sock, (struct sockaddr*) &sin, sizeof(struct sockaddr_in))) {
+                    perror("bind");
+                    return EXIT_FAILURE;
+                }
+
+                SSL* ssl = SSL_new(ctx);
+                SSL_set_fd(ssl, remote_sock);
+
+                if (SSL_connect(ssl) <= 0) {
+                    ERR_print_errors_fp(stderr);
+                    return EXIT_FAILURE;
+                }
+
+                for (;;) {
+                    int size = read(conn_sock, buffer, MAX_PAYLOAD);
+                    if (size < 0) {
+                        perror("read");
+                        break;
+                    } else if (size == 0) {
+                        break;
+                    }
+                    SSL_write(ssl, buffer, MAX_PAYLOAD);
+                }
+
+                puts("Read server closed");
+                close(conn_sock);
+
+                close(local_tls_socket);
+
+                unlink(tls_sock_path);
+
+                SSL_free(ssl);
+
+                close(remote_sock);
+
+                SSL_CTX_free(ctx);
+
+                cleanup_openssl();
+                break;
+            }
+            case -1:
+                perror("fork()");
+                exit(EXIT_FAILURE);
+            default: {
+                //Decrypt
+                const char* decrypt_sock_path = "/var/run/covert_module_decrypt";
+
+                int decrypt_socket = socket(AF_UNIX, SOCK_SEQPACKET, 0);
+
+                struct sockaddr_un su;
+                memset(&su, 0, sizeof(struct sockaddr_un));
+                su.sun_family = AF_UNIX;
+                strcpy(su.sun_path, decrypt_sock_path);
+
+                unlink(decrypt_sock_path);
+                if (bind(decrypt_socket, (struct sockaddr*) &su, sizeof(struct sockaddr_un))
+                        == -1) {
+                    perror("bind");
+                    return EXIT_FAILURE;
+                }
+
+                listen(decrypt_socket, 5);
+
+                socket_loop(pid, decrypt_socket);
+
+                close(decrypt_socket);
+
+                unlink(decrypt_sock_path);
+            } break;
         }
 
-        listen(decrypt_socket, 5);
-
-        socket_loop(pid, decrypt_socket);
-
-        close(decrypt_socket);
-
-        unlink(decrypt_sock_path);
     } else {
         //Encrypt
         const char* encrypt_sock_path = "/var/run/covert_module_encrypt";

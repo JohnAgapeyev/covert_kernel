@@ -5,6 +5,7 @@
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
+#include <openssl/ssl.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
@@ -14,8 +15,8 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
-#include "shared.h"
 #include "crypto.h"
+#include "shared.h"
 
 static int byte_count = 0;
 static int bit_count = 0;
@@ -100,14 +101,14 @@ int main(void) {
                                 covert_buffer[byte_count] &= ~(1 << bit_count);
                             }
 
-
                             printf("Location %d %d\n", byte_count, bit_count);
 
                             if (bit_count == 7) {
                                 ++byte_count;
                                 if (byte_count >= MAX_PAYLOAD) {
                                     printf("Time to decrypt\n");
-                                    unsigned char *plaintext = decrypt_data(covert_buffer, MAX_PAYLOAD, key, NULL, 0);
+                                    unsigned char* plaintext = decrypt_data(
+                                            covert_buffer, MAX_PAYLOAD, key, NULL, 0);
                                     printf("Received message: %.*s\n", MAX_USER_DATA, plaintext);
                                     free(plaintext);
                                     byte_count = 0;
@@ -133,6 +134,10 @@ int main(void) {
 
         close(raw_sock);
     } else {
+        init_openssl();
+        SSL_CTX* ctx = create_context();
+        configure_context(ctx);
+
         //TCP recv loop
         int listen_sock = socket(AF_INET, SOCK_STREAM, 0);
 
@@ -149,14 +154,29 @@ int main(void) {
 
         int conn_sock = accept(listen_sock, NULL, 0);
 
+        SSL* ssl = SSL_new(ctx);
+        SSL_set_fd(ssl, conn_sock);
+
+        if (SSL_accept(ssl) <= 0) {
+            ERR_print_errors_fp(stderr);
+            return EXIT_FAILURE;
+        }
+
         unsigned char buffer[MAX_PAYLOAD];
 
-        while (recv(conn_sock, buffer, MAX_PAYLOAD, 0) > 0) {
+        while (SSL_read(ssl, buffer, MAX_PAYLOAD) > 0) {
             //Do nothing with the data
         }
+
         puts("Read server closed");
 
+        SSL_free(ssl);
+
         close(listen_sock);
+
+        SSL_CTX_free(ctx);
+
+        cleanup_openssl();
     }
     return EXIT_SUCCESS;
 }

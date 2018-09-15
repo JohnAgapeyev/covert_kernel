@@ -33,3 +33,7 @@ unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
 unsigned char* decrypt_data(unsigned char* message, const size_t mesg_len, const unsigned char* key,
         const unsigned char* aad, const size_t aad_len);
 
+void init_openssl(void);
+void cleanup_openssl(void);
+SSL_CTX* create_context(void);
+void configure_context(SSL_CTX* ctx);

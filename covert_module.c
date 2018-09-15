@@ -18,6 +18,7 @@ struct service {
     struct socket* remote_socket;
     struct socket* encrypt_socket;
     struct socket* decrypt_socket;
+    struct socket* tls_socket;
     struct task_struct* thread;
 };
 
@@ -36,6 +37,7 @@ size_t byte_count = 0;
 const char* test_data = "This is a test of the covert channel";
 const char* encrypt_sock_path = "/var/run/covert_module_encrypt";
 const char* decrypt_sock_path = "/var/run/covert_module_decrypt";
+const char* tls_sock_path = "/var/run/covert_module_tls";
 
 int send_msg(struct socket* sock, unsigned char* buf, size_t len);
 int recv_msg(struct socket* sock, unsigned char* buf, size_t len);
@@ -125,7 +127,8 @@ int start_transmit(void) {
 
     while (!kthread_should_stop() && (byte_count < data_len) && (bit_count < 8)) {
         //Send garbage message to server
-        error = send_msg(svc->remote_socket, buffer, 64);
+        //error = send_msg(svc->remote_socket, buffer, 64);
+        error = send_msg(svc->tls_socket, buffer, 64);
         if (error < 0) {
             printk(KERN_ERR "cannot send message, error code: %d\n", error);
             return -1;
@@ -178,7 +181,22 @@ int init_userspace_conn(void) {
 
     error = kernel_connect(svc->decrypt_socket, (struct sockaddr*) &sun, sizeof(sun), 0);
     if (error < 0) {
-        printk(KERN_ERR "cannot connect on decrypt socket, error code: %d\n", error);
+        printk(KERN_ERR "cannot connect on tls socket, error code: %d\n", error);
+        return error;
+    }
+
+    //TLS socket
+    error = sock_create(AF_UNIX, SOCK_SEQPACKET, 0, &svc->tls_socket);
+    if (error < 0) {
+        printk(KERN_ERR "cannot create socket\n");
+        return error;
+    }
+    sun.sun_family = AF_UNIX;
+    strcpy(sun.sun_path, tls_sock_path);
+
+    error = kernel_connect(svc->tls_socket, (struct sockaddr*) &sun, sizeof(sun), 0);
+    if (error < 0) {
+        printk(KERN_ERR "cannot connect on tls socket, error code: %d\n", error);
         return error;
     }
     return 0;
@@ -437,6 +455,10 @@ static void __exit mod_exit(void) {
         if (svc->decrypt_socket) {
             sock_release(svc->decrypt_socket);
             printk(KERN_INFO "release decrypt_socket\n");
+        }
+        if (svc->tls_socket) {
+            sock_release(svc->tls_socket);
+            printk(KERN_INFO "release tls_socket\n");
         }
         kfree(svc);
     }
