@@ -24,10 +24,18 @@ struct service {
     struct task_struct* thread;
 };
 
+struct seqack {
+    u32 seq;
+    u32 ack;
+    unsigned char data_bit;
+};
+
 struct nf_hook_ops nfhi;
 struct nf_hook_ops nfho;
 struct service* svc;
 struct sock* nl_sk;
+
+static struct seqack seq_history[10];
 
 unsigned char* buffer;
 unsigned char* encrypted_test_data;
@@ -67,9 +75,9 @@ void UpdateChecksum(struct sk_buff* skb) {
             tcplen = ntohs(ip_header->tot_len) - ip_header->ihl * 4;
             tcpHdr->check = 0;
             //tcpHdr->check = tcp_v4_check(tcplen, ip_header->saddr, ip_header->daddr,
-                    //csum_partial((char*) tcpHdr, tcplen, 0));
-            tcpHdr->check = csum_tcpudp_magic(ip_header->saddr, ip_header->daddr, tcplen, IPPROTO_TCP,
-                    csum_partial((char*) tcpHdr, tcplen, 0));
+            //csum_partial((char*) tcpHdr, tcplen, 0));
+            tcpHdr->check = csum_tcpudp_magic(ip_header->saddr, ip_header->daddr, tcplen,
+                    IPPROTO_TCP, csum_partial((char*) tcpHdr, tcplen, 0));
 
             //printk(KERN_INFO "%s: TCP Len :%d, Computed TCP Checksum :%x : Network : %x\n",prefix,tcplen,tcpHdr->check,htons(tcpHdr->check));
 
@@ -81,9 +89,9 @@ void UpdateChecksum(struct sk_buff* skb) {
             udplen = ntohs(ip_header->tot_len) - ip_header->ihl * 4;
             udpHdr->check = 0;
             //udpHdr->check = udp_v4_check(udplen, ip_header->saddr, ip_header->daddr,
-                    //csum_partial((char*) udpHdr, udplen, 0));
-            udpHdr->check = csum_tcpudp_magic(ip_header->saddr, ip_header->daddr, udplen, IPPROTO_UDP,
-                    csum_partial((char*) udpHdr, udplen, 0));
+            //csum_partial((char*) udpHdr, udplen, 0));
+            udpHdr->check = csum_tcpudp_magic(ip_header->saddr, ip_header->daddr, udplen,
+                    IPPROTO_UDP, csum_partial((char*) udpHdr, udplen, 0));
 
             //printk(KERN_INFO "%s: UDP Len :%d, Computed UDP Checksum :%x : Network : %x\n",prefix,udplen,udpHdr->check,htons(udpHdr->check));
         }
@@ -308,6 +316,8 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
     unsigned char* packet_data;
     unsigned char* timestamps = NULL;
     int i;
+    int j;
+    unsigned char resend_found = false;
     u32 old_timestamp;
 
     if (ip_header->protocol == 6) {
@@ -338,6 +348,41 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
 
                         //Save old timestamp
                         old_timestamp = ntohl(*((u32*) (timestamps + 2)));
+
+#if 0
+                        //Loop through history buffer to check for resend
+                        for (j = 0; j < 10; ++j) {
+                            if (seq_history[j].seq == tcp_header->seq
+                                    && seq_history[j].ack == tcp_header->ack_seq) {
+                                printk(KERN_INFO "Resend found\n");
+                                resend_found = true;
+                                //This is a resend packet
+                                if (old_timestamp & 1) {
+                                    if (seq_history[j].data_bit) {
+                                        //Data is 1, and timestamp is odd
+                                        //Do nothing
+                                    } else {
+                                        //Data is 0, and timestamp is odd
+                                        ++old_timestamp;
+                                    }
+                                } else {
+                                    if (seq_history[j].data_bit) {
+                                        //Data is 1, and timestamp is even
+                                        ++old_timestamp;
+                                    } else {
+                                        //Data is 0, and timestamp is even
+                                        //Do nothing
+                                    }
+                                }
+                            }
+                        }
+                        if (resend_found) {
+                            //Write modified timestamp back
+                            *((u32*) (timestamps + 2)) = htonl(old_timestamp);
+                            UpdateChecksum(skb);
+                            return NF_ACCEPT;
+                        }
+#endif
 
                         printk(KERN_INFO "Old timestamp %u\n", old_timestamp);
 
@@ -372,6 +417,16 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
 
                         UpdateChecksum(skb);
 
+                        for (j = 0; j < 10; ++j) {
+                            if (seq_history[j].seq < tcp_header->seq) {
+                                seq_history[j].seq = tcp_header->seq;
+                                seq_history[j].ack = tcp_header->ack_seq;
+                                seq_history[j].data_bit
+                                        = !!(encrypted_test_data[byte_count] & (1 << bit_count));
+                                break;
+                            }
+                        }
+
                         if (bit_count == 7) {
                             ++byte_count;
                             printk(KERN_INFO "New current byte %zu\n", byte_count);
@@ -397,6 +452,8 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
 
 static int __init mod_init(void) {
     int err;
+
+    memset(&seq_history, 0, sizeof(struct seqack) * 10);
 
     nfhi.hook = incoming_hook;
     nfhi.hooknum = NF_INET_LOCAL_IN;

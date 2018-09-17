@@ -40,21 +40,26 @@ unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
 
     EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, TAG_LEN, ciphertext + mesg_len);
 
-    printf("Pre Nonce:\n");
-    for (int i = 0; i < NONCE_LEN; ++i) {
-        printf("%02x", nonce[i]);
-    }
-    printf("\n");
-
     memcpy(ciphertext + mesg_len + TAG_LEN, nonce, NONCE_LEN);
 
-    printf("Post Nonce:\n");
+    printf("Nonce:\n");
     for (int i = 0; i < NONCE_LEN; ++i) {
         printf("%02x", ciphertext[mesg_len + TAG_LEN + i]);
     }
     printf("\n");
 
     EVP_CIPHER_CTX_free(ctx);
+
+    printf("Message:\n");
+    for (unsigned long i = 0; i < mesg_len; ++i) {
+        printf("%02x", ciphertext[i]);
+    }
+    printf("\n");
+    printf("Tag:\n");
+    for (unsigned long i = 0; i < TAG_LEN; ++i) {
+        printf("%02x", ciphertext[mesg_len + i]);
+    }
+    printf("\n");
 
     return ciphertext;
 }
