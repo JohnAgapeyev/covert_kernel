@@ -187,7 +187,7 @@ int start_transmit(void) {
         }
 
         get_random_bytes(&sleep_len, sizeof(u32));
-        sleep_len %= 200;
+        sleep_len %= SLEEP_MS;
 
         //Sleep for 200ms
         msleep(sleep_len);
