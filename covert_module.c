@@ -91,7 +91,7 @@ int send_msg(struct socket* sock, unsigned char* buf, size_t len) {
 int start_transmit(void) {
     int error;
     int i;
-    u8 sleep_len;
+    u32 sleep_len;
 
 #if 0
     int flag = 1;
@@ -140,8 +140,8 @@ int start_transmit(void) {
             return -1;
         }
 
-        get_random_bytes(&sleep_len, sizeof(u8));
-        sleep_len %= 50;
+        get_random_bytes(&sleep_len, sizeof(u32));
+        sleep_len %= 200;
 
         //Sleep for 200ms
         msleep(sleep_len);
