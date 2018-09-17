@@ -20,8 +20,6 @@
 #include "crypto.h"
 #include "shared.h"
 
-static unsigned char secret_key[KEY_LEN];
-
 unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
         const unsigned char* key, const unsigned char* aad, const size_t aad_len) {
     unsigned char nonce[NONCE_LEN];

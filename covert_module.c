@@ -90,13 +90,14 @@ int send_msg(struct socket* sock, unsigned char* buf, size_t len) {
 
 int start_transmit(void) {
     int error;
-    int size;
-    struct sockaddr_in sin;
     int i;
-    int flag = 1;
     u8 sleep_len;
 
 #if 0
+    int flag = 1;
+    struct sockaddr_in sin;
+    int size;
+
     error = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &svc->remote_socket);
     if (error < 0) {
         printk(KERN_ERR "cannot create socket\n");
@@ -216,7 +217,6 @@ unsigned int incoming_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                 //Move to the start of the tcp options
                 timestamps = skb->data + (ip_header->ihl * 4) + 20;
                 for (i = 0; i < tcp_header->doff - 5; ++i) {
-                    printk(KERN_INFO "Parsing an option\n");
                     if (*timestamps == 0x00) {
                         //End of options
                         timestamps = NULL;
@@ -272,7 +272,6 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                 //Move to the start of the tcp options
                 timestamps = skb->data + (ip_header->ihl * 4) + 20;
                 for (i = 0; i < tcp_header->doff - 5; ++i) {
-                    printk(KERN_INFO "Parsing an option\n");
                     if (*timestamps == 0x00) {
                         //End of options
                         timestamps = NULL;
@@ -293,7 +292,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                         //Save old timestamp
                         old_timestamp = ntohl(*((u32*) (timestamps + 2)));
 
-                        printk(KERN_INFO "Old timestamp %lu\n", old_timestamp);
+                        printk(KERN_INFO "Old timestamp %u\n", old_timestamp);
 
                         //Modify last bit of send timestamp based on data
                         if (old_timestamp & 1) {
@@ -301,7 +300,6 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                                 //Data is 1, and timestamp is odd
                                 //Do nothing
                                 return NF_DROP;
-                                printk(KERN_INFO "Writing a 1\n");
                             } else {
                                 //Data is 0, and timestamp is odd
                                 //Increment timestamp so that it is even
@@ -318,10 +316,9 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                                 //Data is 0, and timestamp is even
                                 //Do nothing
                                 return NF_DROP;
-                                printk(KERN_INFO "Writing a 0\n");
                             }
                         }
-                        printk(KERN_INFO "New timestamp %lu\n", old_timestamp);
+                        printk(KERN_INFO "New timestamp %u\n", old_timestamp);
 
                         //Write modified timestamp back
                         *((u32*) (timestamps + 2)) = htonl(old_timestamp);
