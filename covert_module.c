@@ -96,6 +96,7 @@ int start_transmit(void) {
     int flag = 1;
     u8 sleep_len;
 
+#if 0
     error = sock_create(PF_INET, SOCK_STREAM, IPPROTO_TCP, &svc->remote_socket);
     if (error < 0) {
         printk(KERN_ERR "cannot create socket\n");
@@ -120,6 +121,7 @@ int start_transmit(void) {
         printk(KERN_ERR "cannot connect to server, error code: %d\n", error);
         return -1;
     }
+#endif
 
     for (i = 0; i < 64; ++i) {
         buffer[i] = i;
@@ -127,26 +129,21 @@ int start_transmit(void) {
 
     while (!kthread_should_stop() && (byte_count < data_len) && (bit_count < 8)) {
         //Send garbage message to server
-        //error = send_msg(svc->remote_socket, buffer, 64);
+#if 0
+        error = send_msg(svc->remote_socket, buffer, 64);
+#else
         error = send_msg(svc->tls_socket, buffer, 64);
+#endif
         if (error < 0) {
             printk(KERN_ERR "cannot send message, error code: %d\n", error);
             return -1;
         }
 
         get_random_bytes(&sleep_len, sizeof(u8));
-        sleep_len %= 500;
+        sleep_len %= 50;
 
         //Sleep for 200ms
         msleep(sleep_len);
-
-#if 0
-        if (bit_count == 7) {
-            ++byte_count;
-            printk(KERN_INFO "New current byte %zu\n", byte_count);
-        }
-        bit_count = (bit_count + 1) % 8;
-#endif
     }
     return 0;
 }
@@ -236,46 +233,10 @@ unsigned int incoming_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                         }
 
                         //EVEN IS 0, ODD IS 1
-
-                        //Save old timestamp
+                        //Undo receive timestamp increment to prevent issues with the stack
                         old_timestamp = ntohl(*((u32*) (timestamps + 2)));
                         --old_timestamp;
                         *((u32*) (timestamps + 2)) = htonl(old_timestamp);
-
-#if 0
-                        printk(KERN_INFO "Old timestamp %lu\n", old_timestamp);
-
-                        //Modify last bit of send timestamp based on data
-                        if (old_timestamp & 1) {
-                            if (!!(encrypted_test_data[byte_count] & (1 << bit_count))) {
-                                //Data is 1, and timestamp is odd
-                                //Do nothing
-                                return NF_DROP;
-                                printk(KERN_INFO "Writing a 1\n");
-                            } else {
-                                //Data is 0, and timestamp is odd
-                                //Increment timestamp so that it is even
-                                ++old_timestamp;
-                                printk(KERN_INFO "Writing a 0\n");
-                            }
-                        } else {
-                            if (!!(encrypted_test_data[byte_count] & (1 << bit_count))) {
-                                //Data is 1, and timestamp is even
-                                //Increment timestamp so that it is odd
-                                ++old_timestamp;
-                                printk(KERN_INFO "Writing a 1\n");
-                            } else {
-                                //Data is 0, and timestamp is even
-                                //Do nothing
-                                return NF_DROP;
-                                printk(KERN_INFO "Writing a 0\n");
-                            }
-                        }
-                        printk(KERN_INFO "New timestamp %lu\n", old_timestamp);
-
-                        //Write modified timestamp back
-                        *((u32 *) (timestamps + 2)) = htonl(old_timestamp);
-#endif
                     } else if (*timestamps == 3) {
                         timestamps += 3;
                     } else if (*timestamps == 4) {
@@ -287,9 +248,6 @@ unsigned int incoming_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                     }
                 }
             }
-
-            //Modify first byte of data
-            //packet_data[0] += 1;
             return NF_ACCEPT;
         }
     }
@@ -385,9 +343,6 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                     }
                 }
             }
-
-            //Modify first byte of data
-            //packet_data[0] += 1;
             return NF_ACCEPT;
         }
     }
@@ -443,11 +398,13 @@ static void __exit mod_exit(void) {
     nf_unregister_net_hook(&init_net, &nfhi);
 
     if (svc) {
+#if 0
         if (svc->remote_socket) {
-            kernel_sock_shutdown(svc->remote_socket, SHUT_RDWR);
+            //kernel_sock_shutdown(svc->remote_socket, SHUT_RDWR);
             sock_release(svc->remote_socket);
             printk(KERN_INFO "release remote socket\n");
         }
+#endif
         if (svc->encrypt_socket) {
             sock_release(svc->encrypt_socket);
             printk(KERN_INFO "release encrypt_socket\n");
