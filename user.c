@@ -1,9 +1,14 @@
 #include <asm/types.h>
 #include <assert.h>
+#include <linux/tcp.h>
+#include <netinet/ip.h>
+#include <netinet/tcp.h>
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>
+#include <openssl/ssl.h>
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -131,7 +136,7 @@ SSL_CTX* create_context(void) {
     const SSL_METHOD* method;
     SSL_CTX* ctx;
 
-    method = SSLv23_server_method();
+    method = TLS_method();
 
     ctx = SSL_CTX_new(method);
     if (!ctx) {

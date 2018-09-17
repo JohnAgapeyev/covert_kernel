@@ -148,7 +148,7 @@ int main(void) {
                 sin.sin_port = htons(PORT);
 
                 if (connect(remote_sock, (struct sockaddr*) &sin, sizeof(struct sockaddr_in))) {
-                    perror("bind");
+                    perror("connect");
                     return EXIT_FAILURE;
                 }
 
