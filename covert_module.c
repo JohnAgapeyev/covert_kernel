@@ -3,12 +3,14 @@
 #include <linux/kernel.h>
 #include <linux/kthread.h>
 #include <linux/module.h>
+#include <linux/net.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter_ipv4.h>
 #include <linux/skbuff.h>
 #include <linux/slab.h>
 #include <linux/tcp.h>
 #include <linux/types.h>
+#include <linux/udp.h>
 #include <linux/un.h>
 #include <net/sock.h>
 
@@ -43,6 +45,50 @@ int send_msg(struct socket* sock, unsigned char* buf, size_t len);
 int recv_msg(struct socket* sock, unsigned char* buf, size_t len);
 int start_transmit(void);
 int init_userspace_conn(void);
+void UpdateChecksum(struct sk_buff* skb);
+
+void UpdateChecksum(struct sk_buff* skb) {
+    struct iphdr* ip_header = ip_hdr(skb);
+    skb->ip_summed = CHECKSUM_NONE; //stop offloading
+    skb->csum_valid = 0;
+    ip_header->check = 0;
+    ip_header->check = ip_fast_csum((u8*) ip_header, ip_header->ihl);
+
+    if ((ip_header->protocol == IPPROTO_TCP) || (ip_header->protocol == IPPROTO_UDP)) {
+        if (skb_is_nonlinear(skb)) {
+            skb_linearize(skb);
+        }
+
+        if (ip_header->protocol == IPPROTO_TCP) {
+            unsigned int tcplen;
+            struct tcphdr* tcpHdr = tcp_hdr(skb);
+
+            skb->csum = 0;
+            tcplen = ntohs(ip_header->tot_len) - ip_header->ihl * 4;
+            tcpHdr->check = 0;
+            //tcpHdr->check = tcp_v4_check(tcplen, ip_header->saddr, ip_header->daddr,
+                    //csum_partial((char*) tcpHdr, tcplen, 0));
+            tcpHdr->check = csum_tcpudp_magic(ip_header->saddr, ip_header->daddr, tcplen, IPPROTO_TCP,
+                    csum_partial((char*) tcpHdr, tcplen, 0));
+
+            //printk(KERN_INFO "%s: TCP Len :%d, Computed TCP Checksum :%x : Network : %x\n",prefix,tcplen,tcpHdr->check,htons(tcpHdr->check));
+
+        } else if (ip_header->protocol == IPPROTO_UDP) {
+            unsigned int udplen;
+
+            struct udphdr* udpHdr = udp_hdr(skb);
+            skb->csum = 0;
+            udplen = ntohs(ip_header->tot_len) - ip_header->ihl * 4;
+            udpHdr->check = 0;
+            //udpHdr->check = udp_v4_check(udplen, ip_header->saddr, ip_header->daddr,
+                    //csum_partial((char*) udpHdr, udplen, 0));
+            udpHdr->check = csum_tcpudp_magic(ip_header->saddr, ip_header->daddr, udplen, IPPROTO_UDP,
+                    csum_partial((char*) udpHdr, udplen, 0));
+
+            //printk(KERN_INFO "%s: UDP Len :%d, Computed UDP Checksum :%x : Network : %x\n",prefix,udplen,udpHdr->check,htons(udpHdr->check));
+        }
+    }
+}
 
 int recv_msg(struct socket* sock, unsigned char* buf, size_t len) {
     struct msghdr msg;
@@ -237,6 +283,7 @@ unsigned int incoming_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                         old_timestamp = ntohl(*((u32*) (timestamps + 2)));
                         --old_timestamp;
                         *((u32*) (timestamps + 2)) = htonl(old_timestamp);
+                        UpdateChecksum(skb);
                     } else if (*timestamps == 3) {
                         timestamps += 3;
                     } else if (*timestamps == 4) {
@@ -322,6 +369,8 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
 
                         //Write modified timestamp back
                         *((u32*) (timestamps + 2)) = htonl(old_timestamp);
+
+                        UpdateChecksum(skb);
 
                         if (bit_count == 7) {
                             ++byte_count;
