@@ -384,11 +384,6 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                         }
 #endif
 
-                        printk(KERN_INFO "Old timestamp %u\n", old_timestamp);
-                        printk(KERN_INFO "%02x", encrypted_test_data[0]);
-                        printk(KERN_INFO "%02x", encrypted_test_data[1]);
-                        printk(KERN_INFO "%02x", encrypted_test_data[2]);
-                        printk(KERN_INFO "%02x", encrypted_test_data[3]);
 
                         //Modify last bit of send timestamp based on data
                         if (old_timestamp & 1) {
@@ -397,6 +392,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                                 //Do nothing
                                 return NF_DROP;
                             } else {
+                                printk(KERN_INFO "Old timestamp %u\n", old_timestamp);
                                 //Data is 0, and timestamp is odd
                                 //Increment timestamp so that it is even
                                 ++old_timestamp;
@@ -404,6 +400,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                             }
                         } else {
                             if (!!(encrypted_test_data[byte_count] & (1 << bit_count))) {
+                                printk(KERN_INFO "Old timestamp %u\n", old_timestamp);
                                 //Data is 1, and timestamp is even
                                 //Increment timestamp so that it is odd
                                 ++old_timestamp;
