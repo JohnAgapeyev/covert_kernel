@@ -314,17 +314,25 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
     struct iphdr* ip_header = (struct iphdr*) skb_network_header(skb);
     struct tcphdr* tcp_header;
     unsigned char* packet_data;
+    size_t packet_len;
     unsigned char* timestamps = NULL;
     int i;
     int j;
+    int hist_index = 0;
     unsigned char resend_found = false;
     u32 old_timestamp;
 
     if (ip_header->protocol == 6) {
         tcp_header = (struct tcphdr*) skb_transport_header(skb);
         packet_data = skb->data + (ip_header->ihl * 4) + (tcp_header->doff * 4);
+        packet_len = ntohs(ip_header->tot_len) - ((ip_header->ihl + tcp_header->doff) * 4);
 
-        if (ntohs(tcp_header->dest) == 666 && !tcp_header->syn) {
+        //printk(KERN_INFO "Packet length %u\n", ntohs(ip_header->tot_len));
+        //printk(KERN_INFO "Packet length %u\n", (ip_header->ihl) * 4);
+        //printk(KERN_INFO "Packet length %u\n", (tcp_header->doff) * 4);
+        printk(KERN_INFO "Packet length %u\n", packet_len);
+
+        if (ntohs(tcp_header->dest) == 666 && !tcp_header->syn && packet_len > 0) {
             if (tcp_header->doff > 5) {
                 //Move to the start of the tcp options
                 timestamps = skb->data + (ip_header->ihl * 4) + 20;
@@ -349,12 +357,14 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                         //Save old timestamp
                         old_timestamp = ntohl(*((u32*) (timestamps + 2)));
 
-#if 0
+#if 1
                         //Loop through history buffer to check for resend
                         for (j = 0; j < 10; ++j) {
                             if (seq_history[j].seq == tcp_header->seq
                                     && seq_history[j].ack == tcp_header->ack_seq) {
                                 printk(KERN_INFO "Resend found\n");
+                                printk(KERN_INFO "SEQ %lu\n", tcp_header->seq);
+                                printk(KERN_INFO "SEQ %lu\n", data_len);
                                 resend_found = true;
                                 //This is a resend packet
                                 if (old_timestamp & 1) {
@@ -374,6 +384,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                                         //Do nothing
                                     }
                                 }
+                                break;
                             }
                         }
                         if (resend_found) {
@@ -383,7 +394,6 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                             return NF_ACCEPT;
                         }
 #endif
-
 
                         //Modify last bit of send timestamp based on data
                         if (old_timestamp & 1) {
@@ -418,15 +428,12 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
 
                         UpdateChecksum(skb);
 
-                        for (j = 0; j < 10; ++j) {
-                            if (seq_history[j].seq < tcp_header->seq) {
-                                seq_history[j].seq = tcp_header->seq;
-                                seq_history[j].ack = tcp_header->ack_seq;
-                                seq_history[j].data_bit
-                                        = !!(encrypted_test_data[byte_count] & (1 << bit_count));
-                                break;
-                            }
-                        }
+                        seq_history[hist_index].seq = tcp_header->seq;
+                        seq_history[hist_index].ack = tcp_header->ack_seq;
+                        seq_history[hist_index].data_bit
+                                = !!(encrypted_test_data[byte_count] & (1 << bit_count));
+
+                        hist_index = (hist_index + 1) % 10;
 
                         if (bit_count == 7) {
                             ++byte_count;

@@ -68,7 +68,10 @@ int main(void) {
             unsigned char* timestamps;
             struct iphdr* ip = (struct iphdr*) buffer;
             struct tcphdr* tcp = (struct tcphdr*) (buffer + ip->ihl * 4);
-            if (ntohs(tcp->dest) == 666 && !tcp->syn) {
+
+            size_t packet_len
+                    = ntohs(ip->tot_len) - ((ip->ihl + tcp->doff) * 4);
+            if (ntohs(tcp->dest) == 666 && !tcp->syn && packet_len > 0) {
                 //printf("Received packet of length %d from raw sock\n", packet_size);
                 if (tcp->doff > 5) {
                     //Move to the start of the tcp options
@@ -111,7 +114,8 @@ int main(void) {
                                     memcpy(&covert_data_size, covert_buffer, sizeof(uint32_t));
                                     //covert_data_size = ntohl(covert_data_size);
                                     //covert_data_size = htonl(covert_data_size);
-                                    printf("Data size %02x%02x%02x%02x\n", covert_buffer[0], covert_buffer[1], covert_buffer[2], covert_buffer[3]);
+                                    printf("Data size %02x%02x%02x%02x\n", covert_buffer[0],
+                                            covert_buffer[1], covert_buffer[2], covert_buffer[3]);
                                 }
                                 if (byte_count >= covert_data_size + sizeof(uint32_t)) {
                                     printf("Time to decrypt\n");
