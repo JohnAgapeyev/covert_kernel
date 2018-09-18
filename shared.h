@@ -5,7 +5,7 @@
 #define SERVER_IP (127 | 0 << 8 | 0 << 16 | 1 << 24)
 
 #define PORT 666
-#define SLEEP_MS 50
+#define SLEEP_MS 250
 
 #define TAG_LEN 16
 #define NONCE_LEN 12

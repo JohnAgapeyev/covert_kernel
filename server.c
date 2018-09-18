@@ -109,7 +109,7 @@ int main(void) {
                                 if (byte_count == 4) {
                                     //Set remaining data length
                                     memcpy(&covert_data_size, covert_buffer, sizeof(uint32_t));
-                                    covert_data_size = ntohl(covert_data_size);
+                                    //covert_data_size = ntohl(covert_data_size);
                                     //covert_data_size = htonl(covert_data_size);
                                     printf("Data size %02x%02x%02x%02x\n", covert_buffer[0], covert_buffer[1], covert_buffer[2], covert_buffer[3]);
                                 }

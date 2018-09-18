@@ -45,7 +45,7 @@ unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
     //Shift ciphertext over and prepend length to it
     memmove(ciphertext + sizeof(uint32_t), ciphertext, mesg_len + TAG_LEN + NONCE_LEN);
 
-    uint32_t cipher_len = htonl(mesg_len + TAG_LEN + NONCE_LEN);
+    uint32_t cipher_len = mesg_len + TAG_LEN + NONCE_LEN;
 
     memcpy(ciphertext, &cipher_len, sizeof(uint32_t));
 
