@@ -32,7 +32,7 @@ unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
     EVP_EncryptUpdate(ctx, NULL, &len, aad, aad_len);
 
     //Allocate enough for the message and the tag
-    unsigned char* ciphertext = malloc(mesg_len + TAG_LEN + NONCE_LEN);
+    unsigned char* ciphertext = malloc(mesg_len + TAG_LEN + NONCE_LEN + sizeof(uint32_t));
 
     EVP_EncryptUpdate(ctx, ciphertext, &len, message, mesg_len);
 
@@ -41,6 +41,13 @@ unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
     EVP_CIPHER_CTX_ctrl(ctx, EVP_CTRL_GCM_GET_TAG, TAG_LEN, ciphertext + mesg_len);
 
     memcpy(ciphertext + mesg_len + TAG_LEN, nonce, NONCE_LEN);
+
+    //Shift ciphertext over and prepend length to it
+    memmove(ciphertext + sizeof(uint32_t), ciphertext, mesg_len + TAG_LEN + NONCE_LEN);
+
+    uint32_t cipher_len = mesg_len + TAG_LEN + NONCE_LEN;
+
+    memcpy(ciphertext, &cipher_len, sizeof(uint32_t));
 
     printf("Nonce:\n");
     for (int i = 0; i < NONCE_LEN; ++i) {
@@ -60,6 +67,7 @@ unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
         printf("%02x", ciphertext[mesg_len + i]);
     }
     printf("\n");
+
 
     return ciphertext;
 }

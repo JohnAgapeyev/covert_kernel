@@ -38,9 +38,11 @@ void socket_loop(const pid_t pid, const int sock) {
 
         unsigned char* modified_data;
 
+        uint32_t aad = size + TAG_LEN + NONCE_LEN;
+
         if (pid == 0) {
             //Decrypt
-            modified_data = decrypt_data(buffer, size, secret_key, NULL, 0);
+            modified_data = decrypt_data(buffer + sizeof(uint32_t), size - sizeof(uint32_t), secret_key, buffer, sizeof(uint32_t));
             if (modified_data) {
                 write(conn_sock, modified_data, size - TAG_LEN - NONCE_LEN);
             } else {
@@ -48,8 +50,8 @@ void socket_loop(const pid_t pid, const int sock) {
             }
         } else {
             //Encrypt
-            modified_data = encrypt_data(buffer, size, secret_key, NULL, 0);
-            write(conn_sock, modified_data, size + TAG_LEN + NONCE_LEN);
+            modified_data = encrypt_data(buffer, size, secret_key, (unsigned char *) &aad, sizeof(aad));
+            write(conn_sock, modified_data, size + TAG_LEN + NONCE_LEN + sizeof(uint32_t));
         }
 
         free(modified_data);

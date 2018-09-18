@@ -44,7 +44,7 @@ size_t data_len;
 size_t bit_count = 0;
 size_t byte_count = 0;
 
-const char* test_data = "This is a test of the covert channel";
+const char* test_data = "This is a test of the covert channel with arbitrary length data.";
 const char* encrypt_sock_path = "/var/run/covert_module_encrypt";
 const char* decrypt_sock_path = "/var/run/covert_module_decrypt";
 const char* tls_sock_path = "/var/run/covert_module_tls";
@@ -385,6 +385,10 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
 #endif
 
                         printk(KERN_INFO "Old timestamp %u\n", old_timestamp);
+                        printk(KERN_INFO "%02x", encrypted_test_data[0]);
+                        printk(KERN_INFO "%02x", encrypted_test_data[1]);
+                        printk(KERN_INFO "%02x", encrypted_test_data[2]);
+                        printk(KERN_INFO "%02x", encrypted_test_data[3]);
 
                         //Modify last bit of send timestamp based on data
                         if (old_timestamp & 1) {
@@ -484,9 +488,9 @@ static int __init mod_init(void) {
     //Get the encrypted version of my test data
     strcpy(buffer, test_data);
     send_msg(svc->encrypt_socket, buffer, strlen(test_data));
-    recv_msg(svc->encrypt_socket, encrypted_test_data, strlen(test_data) + OVERHEAD_LEN);
+    recv_msg(svc->encrypt_socket, encrypted_test_data, strlen(test_data) + OVERHEAD_LEN + 4);
 
-    data_len = strlen(test_data) + OVERHEAD_LEN;
+    data_len = strlen(test_data) + OVERHEAD_LEN + 4;
 
     printk(KERN_INFO "Data length %zu\n", data_len);
 

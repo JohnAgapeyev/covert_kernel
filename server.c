@@ -18,8 +18,9 @@
 #include "crypto.h"
 #include "shared.h"
 
-static int byte_count = 0;
-static int bit_count = 0;
+static unsigned int byte_count = 0;
+static unsigned int bit_count = 0;
+static uint32_t covert_data_size = 0;
 static unsigned char covert_buffer[MAX_PAYLOAD];
 static unsigned char key[KEY_LEN];
 
@@ -101,14 +102,21 @@ int main(void) {
                                 covert_buffer[byte_count] &= ~(1 << bit_count);
                             }
 
-                            printf("Location %d %d\n", byte_count, bit_count);
+                            printf("Location %u %u %u\n", byte_count, bit_count, covert_data_size);
 
                             if (bit_count == 7) {
                                 ++byte_count;
-                                if (byte_count >= MAX_PAYLOAD) {
+                                if (byte_count == 4) {
+                                    //Set remaining data length
+                                    memcpy(&covert_data_size, covert_buffer, sizeof(uint32_t));
+                                    //covert_data_size = htonl(covert_data_size);
+                                    printf("Data size %02x%02x%02x%02x\n", covert_buffer[0], covert_buffer[1], covert_buffer[2], covert_buffer[3]);
+                                }
+                                if (byte_count >= covert_data_size + sizeof(uint32_t)) {
                                     printf("Time to decrypt\n");
                                     unsigned char* plaintext = decrypt_data(
-                                            covert_buffer, MAX_PAYLOAD, key, NULL, 0);
+                                            covert_buffer + sizeof(uint32_t), covert_data_size, key,
+                                            (unsigned char*) covert_buffer, sizeof(uint32_t));
                                     printf("Received message: %.*s\n", MAX_USER_DATA, plaintext);
                                     free(plaintext);
                                     byte_count = 0;
