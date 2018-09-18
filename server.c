@@ -71,7 +71,7 @@ int main(void) {
 
             size_t packet_len
                     = ntohs(ip->tot_len) - ((ip->ihl + tcp->doff) * 4);
-            if (ntohs(tcp->dest) == 666 && !tcp->syn && packet_len > 0) {
+            if (ntohs(tcp->dest) == 666 && !tcp->syn && tcp->psh && packet_len > 0) {
                 //printf("Received packet of length %d from raw sock\n", packet_size);
                 if (tcp->doff > 5) {
                     //Move to the start of the tcp options

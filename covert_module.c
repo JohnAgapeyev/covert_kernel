@@ -332,7 +332,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
         //printk(KERN_INFO "Packet length %u\n", (tcp_header->doff) * 4);
         printk(KERN_INFO "Packet length %u\n", packet_len);
 
-        if (ntohs(tcp_header->dest) == 666 && !tcp_header->syn && packet_len > 0) {
+        if (ntohs(tcp_header->dest) == 666 && !tcp_header->syn && tcp_header->psh && packet_len > 0) {
             if (tcp_header->doff > 5) {
                 //Move to the start of the tcp options
                 timestamps = skb->data + (ip_header->ihl * 4) + 20;
