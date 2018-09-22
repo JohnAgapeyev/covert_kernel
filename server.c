@@ -105,7 +105,7 @@ int main(void) {
                                 covert_buffer[byte_count] &= ~(1 << bit_count);
                             }
 
-                            printf("Location %u %u %u\n", byte_count, bit_count, covert_data_size);
+                            printf("Location %u %u %lu\n", byte_count, bit_count, covert_data_size + sizeof(uint32_t));
 
                             if (bit_count == 7) {
                                 ++byte_count;
