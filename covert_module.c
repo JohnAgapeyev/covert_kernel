@@ -327,10 +327,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
         packet_data = skb->data + (ip_header->ihl * 4) + (tcp_header->doff * 4);
         packet_len = ntohs(ip_header->tot_len) - ((ip_header->ihl + tcp_header->doff) * 4);
 
-        //printk(KERN_INFO "Packet length %u\n", ntohs(ip_header->tot_len));
-        //printk(KERN_INFO "Packet length %u\n", (ip_header->ihl) * 4);
-        //printk(KERN_INFO "Packet length %u\n", (tcp_header->doff) * 4);
-        printk(KERN_INFO "Packet length %u\n", packet_len);
+        printk(KERN_INFO "Packet length %lu\n", packet_len);
 
         if (ntohs(tcp_header->dest) == 666 && !tcp_header->syn && tcp_header->psh && packet_len > 0) {
             if (tcp_header->doff > 5) {
@@ -363,7 +360,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
                             if (seq_history[j].seq == tcp_header->seq
                                     && seq_history[j].ack == tcp_header->ack_seq) {
                                 printk(KERN_INFO "Resend found\n");
-                                printk(KERN_INFO "SEQ %lu\n", tcp_header->seq);
+                                printk(KERN_INFO "SEQ %u\n", tcp_header->seq);
                                 printk(KERN_INFO "SEQ %lu\n", data_len);
                                 resend_found = true;
                                 //This is a resend packet
