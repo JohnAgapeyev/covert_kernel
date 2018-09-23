@@ -1,3 +1,10 @@
+/*
+ * Author and Designer: John Agapeyev
+ * Date: 2018-09-22
+ * Notes:
+ * Shared data across the covert channel
+ */
+
 #ifndef SHARED_H
 #define SHARED_H
 

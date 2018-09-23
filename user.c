@@ -1,3 +1,10 @@
+/*
+ * Author and Designer: John Agapeyev
+ * Date: 2018-09-22
+ * Notes:
+ * The OpenSSL wrappers for userspace
+ */
+
 #include <asm/types.h>
 #include <assert.h>
 #include <linux/tcp.h>
@@ -20,6 +27,23 @@
 #include "crypto.h"
 #include "shared.h"
 
+/*
+ * function:
+ *    encrypt_data
+ *
+ * return:
+ *    unsigned char * *
+ *
+ * parameters:
+ *    const unsigned char* message
+ *    const size_t mesg_len
+ *    const unsigned char* key
+ *    const unsigned char* aad
+ *    const size_t aad_len
+ *
+ * notes:
+ * Encrypts data using ChaCha20-Poly1305 and stores the required data appended to the ciphertext
+ */
 unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
         const unsigned char* key, const unsigned char* aad, const size_t aad_len) {
     unsigned char nonce[NONCE_LEN];
@@ -68,10 +92,26 @@ unsigned char* encrypt_data(const unsigned char* message, const size_t mesg_len,
     }
     printf("\n");
 
-
     return ciphertext;
 }
 
+/*
+ * function:
+ *    decrypt_data
+ *
+ * return:
+ *    unsigned char *
+ *
+ * parameters:
+ *    unsigned char* message
+ *    const size_t mesg_len
+ *    const unsigned char* key
+ *    const unsigned char* aad
+ *    const size_t aad_len
+ *
+ * notes:
+ * Wraps OpenSSL calls to decrypt the message.
+ */
 unsigned char* decrypt_data(unsigned char* message, const size_t mesg_len, const unsigned char* key,
         const unsigned char* aad, const size_t aad_len) {
     EVP_CIPHER_CTX* ctx = EVP_CIPHER_CTX_new();
@@ -134,15 +174,50 @@ unsigned char* decrypt_data(unsigned char* message, const size_t mesg_len, const
     return plaintext;
 }
 
+/*
+ * function:
+ *    init_openssl
+ *
+ * return:
+ *    void
+ *
+ * parameters:
+ *    void
+ *
+ */
 void init_openssl(void) {
     SSL_load_error_strings();
     OpenSSL_add_ssl_algorithms();
 }
 
+/*
+ * function:
+ *    cleanup_openssl
+ *
+ * return:
+ *    void
+ *
+ * parameters:
+ *    void
+ *
+ */
 void cleanup_openssl(void) {
     EVP_cleanup();
 }
 
+/*
+ * function:
+ *    create_context
+ *
+ * return:
+ *    SSL_CTX *
+ *
+ * parameters:
+ *    void
+ *
+ * notes:
+ * Creates a generic TLS SSL context
+ */
 SSL_CTX* create_context(void) {
     const SSL_METHOD* method;
     SSL_CTX* ctx;
@@ -159,6 +234,19 @@ SSL_CTX* create_context(void) {
     return ctx;
 }
 
+/*
+ * function:
+ *    configure_context
+ *
+ * return:
+ *    void
+ *
+ * parameters:
+ *    SSL_CTX* ctx
+ *
+ * notes:
+ * Tells the SSL context to use the testing cert and key
+ */
 void configure_context(SSL_CTX* ctx) {
     SSL_CTX_set_ecdh_auto(ctx, 1);
 

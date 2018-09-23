@@ -1,3 +1,10 @@
+/*
+ * Author and Designer: John Agapeyev
+ * Date: 2018-09-22
+ * Notes:
+ * The OpenSSL wrappers for userspace
+ */
+
 #include <openssl/err.h>
 #include <openssl/evp.h>
 #include <openssl/rand.h>

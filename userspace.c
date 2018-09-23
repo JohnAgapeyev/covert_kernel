@@ -1,3 +1,10 @@
+/*
+ * Author and Designer: John Agapeyev
+ * Date: 2018-09-22
+ * Notes:
+ * The socket handling for userspace
+ */
+
 #include <asm/types.h>
 #include <assert.h>
 #include <linux/tcp.h>
@@ -22,6 +29,21 @@
 
 static unsigned char secret_key[KEY_LEN];
 
+/*
+ * function:
+ *    socket_loop
+ *
+ * return:
+ *    void
+ *
+ * parameters:
+ *    const pid_t pid
+ *    const int sock
+ *
+ * notes:
+ * Read from a given socket and perform either encryption or decryption
+ * and then return the result back through the socket
+ */
 void socket_loop(const pid_t pid, const int sock) {
     unsigned char buffer[MAX_PAYLOAD];
 
@@ -42,7 +64,8 @@ void socket_loop(const pid_t pid, const int sock) {
 
         if (pid == 0) {
             //Decrypt
-            modified_data = decrypt_data(buffer + sizeof(uint32_t), size - sizeof(uint32_t), secret_key, buffer, sizeof(uint32_t));
+            modified_data = decrypt_data(buffer + sizeof(uint32_t), size - sizeof(uint32_t),
+                    secret_key, buffer, sizeof(uint32_t));
             if (modified_data) {
                 write(conn_sock, modified_data, size - TAG_LEN - NONCE_LEN);
             } else {
@@ -50,7 +73,8 @@ void socket_loop(const pid_t pid, const int sock) {
             }
         } else {
             //Encrypt
-            modified_data = encrypt_data(buffer, size, secret_key, (unsigned char *) &aad, sizeof(aad));
+            modified_data
+                    = encrypt_data(buffer, size, secret_key, (unsigned char*) &aad, sizeof(aad));
             write(conn_sock, modified_data, size + TAG_LEN + NONCE_LEN + sizeof(uint32_t));
         }
 
@@ -59,30 +83,22 @@ void socket_loop(const pid_t pid, const int sock) {
     close(conn_sock);
 }
 
+/*
+ * function:
+ *    main
+ *
+ * return:
+ *    int
+ *
+ * parameters:
+ *    void
+ *
+ * notes:
+ * Daemonizes and forks into encrypt, decrypt, and TLS sockets.
+ * encrypt and decrypt are simply unix socket connections
+ * TLS socket is a pure forwarder for the kernel module over TLS (since the kernel doesn't do TLS)
+ */
 int main(void) {
-#if 0
-    unsigned char mesg[32];
-    memset(mesg, 'A', 32);
-
-    unsigned char nonce[NONCE_LEN];
-    memset(nonce, 0xab, NONCE_LEN);
-
-    unsigned char key[KEY_LEN];
-    memset(key, 0xfe, KEY_LEN);
-
-    const char* aad = "Goodbye World";
-
-    unsigned char* ciphertext = encrypt_data(mesg, 32, key, NULL, 0);
-
-    unsigned char* plaintext = decrypt_data(ciphertext, 32 + TAG_LEN + NONCE_LEN, key, NULL, 0);
-
-    if (plaintext && memcmp(mesg, plaintext, 32) == 0) {
-        puts("Encryption works fine");
-    } else {
-        puts("Encryption FAILED");
-    }
-#else
-
     //Daemonize
     switch (fork()) {
         case 0:
@@ -244,8 +260,5 @@ int main(void) {
 
         unlink(encrypt_sock_path);
     }
-
-#endif
-
     return EXIT_SUCCESS;
 }

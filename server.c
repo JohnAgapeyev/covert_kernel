@@ -1,3 +1,10 @@
+/*
+ * Author and Designer: John Agapeyev
+ * Date: 2018-09-22
+ * Notes:
+ * The covert channel server to receive and decrypt data
+ */
+
 #include <assert.h>
 #include <linux/tcp.h>
 #include <netinet/ip.h>
@@ -24,6 +31,22 @@ static uint32_t covert_data_size = 0;
 static unsigned char covert_buffer[MAX_PAYLOAD];
 static unsigned char key[KEY_LEN];
 
+
+/*
+ * function:
+ *    main
+ *
+ * return:
+ *    int
+ *
+ * parameters:
+ *    void
+ *
+ * notes:
+ * Handles daemonization and forking into read and raw servers.
+ * Read server establishes a TLS session and discards any incoming data.
+ * Raw server parses TCP timestamp values and decrypts the resulting data.
+ */
 int main(void) {
     //Daemonize
     switch (fork()) {
