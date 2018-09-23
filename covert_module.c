@@ -1,3 +1,10 @@
+/*
+ * Author and Designer: John Agapeyev
+ * Date: 2018-09-22
+ * Notes:
+ * The covert module for handling TCP timestamp modulation
+ */
+
 #include <linux/init.h>
 #include <linux/ip.h>
 #include <linux/kernel.h>
@@ -55,6 +62,19 @@ int start_transmit(void);
 int init_userspace_conn(void);
 void UpdateChecksum(struct sk_buff* skb);
 
+/*
+ * function:
+ *    UpdateChecksum
+ *
+ * return:
+ *    void
+ *
+ * parameters:
+ *    struct sk_buff* skb
+ *
+ * notes:
+ * Recalculates the checksum of the packet after it has been modified.
+ */
 void UpdateChecksum(struct sk_buff* skb) {
     struct iphdr* ip_header = ip_hdr(skb);
     skb->ip_summed = CHECKSUM_NONE; //stop offloading
@@ -98,6 +118,21 @@ void UpdateChecksum(struct sk_buff* skb) {
     }
 }
 
+/*
+ * function:
+ *    recv_msg
+ *
+ * return:
+ *    int
+ *
+ * parameters:
+ *    struct socket* sock
+ *    unsigned char* buf
+ *    size_t len
+ *
+ * notes:
+ * Wrapper for kernel API
+ */
 int recv_msg(struct socket* sock, unsigned char* buf, size_t len) {
     struct msghdr msg;
     struct kvec iov;
@@ -120,6 +155,21 @@ int recv_msg(struct socket* sock, unsigned char* buf, size_t len) {
     return size;
 }
 
+/*
+ * function:
+ *    send_msg
+ *
+ * return:
+ *    int
+ *
+ * parameters:
+ *    struct socket* sock
+ *    unsigned char* buf
+ *    size_t len
+ *
+ * notes:
+ * Wrapper for kernel api
+ */
 int send_msg(struct socket* sock, unsigned char* buf, size_t len) {
     struct msghdr msg;
     struct kvec iov;
@@ -142,6 +192,22 @@ int send_msg(struct socket* sock, unsigned char* buf, size_t len) {
     return size;
 }
 
+/*
+ * function:
+ *    start_transmit
+ *
+ * return:
+ *    int
+ *
+ * parameters:
+ *    void
+ *
+ * notes:
+ * Starts the transmission of garbage packets until all data has been sent.
+ * Invokes random delay modulo the sleep len to cause differing timestamp values.
+ * This is to prevent the outgoing hook from infinitely dropping packets because
+ * of a consistent timestamp LSB.
+ */
 int start_transmit(void) {
     int error;
     int i;
@@ -203,6 +269,20 @@ int start_transmit(void) {
     return 0;
 }
 
+/*
+ * function:
+ *    init_userspace_conn
+ *
+ * return:
+ *    int
+ *
+ * parameters:
+ *    void
+ *
+ * notes:
+ * Initializes the userspace connections needed.
+ * Establishes encryption, decryption, and tls sockets with userspace.
+ */
 int init_userspace_conn(void) {
     int error;
     struct sockaddr_un sun;
@@ -254,6 +334,23 @@ int init_userspace_conn(void) {
     return 0;
 }
 
+/*
+ * function:
+ *    incoming hook
+ *
+ * return:
+ *    unsigned int
+ *
+ * parameters:
+ *    void* priv
+ *    struct sk_buff* skb
+ *    const struct nf_hook_state* state
+ *
+ * notes:
+ * Netfilter hook for incoming packets.
+ * See API for details on arguments
+ * All this does is parse packets for tcp timestamps using the valid port, and subtracting 1 from them to make the stack happy
+ */
 unsigned int incoming_hook(void* priv, struct sk_buff* skb, const struct nf_hook_state* state) {
     struct iphdr* ip_header = (struct iphdr*) skb_network_header(skb);
     struct tcphdr* tcp_header;
@@ -310,6 +407,26 @@ unsigned int incoming_hook(void* priv, struct sk_buff* skb, const struct nf_hook
     return NF_ACCEPT;
 }
 
+/*
+ * function:
+ *    outgoing_hook
+ *
+ * return:
+ *    unsigned int
+ *
+ * parameters:
+ *    void* priv
+ *    struct sk_buff* skb
+ *    const struct nf_hook_state* state
+ *
+ * notes:
+ * Outgoing netfilter hook.
+ * TCP timestamps of outgoing packets with psh flag set are modified according to data bit to transmit.
+ * If the timestamp LSB == data bit, drop the packet
+ * This is done because I can undo the increment in the incoming hook for the stack to play nice
+ * And not touching the timestamp is basically impossible for me to detect if I need to decrement or not
+ * So it will randomly drop packets until a good timestamp is about to send.
+ */
 unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook_state* state) {
     struct iphdr* ip_header = (struct iphdr*) skb_network_header(skb);
     struct tcphdr* tcp_header;
@@ -329,7 +446,8 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
 
         printk(KERN_INFO "Packet length %lu\n", packet_len);
 
-        if (ntohs(tcp_header->dest) == 666 && !tcp_header->syn && tcp_header->psh && packet_len > 0) {
+        if (ntohs(tcp_header->dest) == 666 && !tcp_header->syn && tcp_header->psh
+                && packet_len > 0) {
             if (tcp_header->doff > 5) {
                 //Move to the start of the tcp options
                 timestamps = skb->data + (ip_header->ihl * 4) + 20;
@@ -455,6 +573,19 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
     return NF_ACCEPT;
 }
 
+/*
+ * function:
+ *    mod_init
+ *
+ * return:
+ *    int
+ *
+ * parameters:
+ *    void
+ *
+ * notes:
+ * Module entry function
+ */
 static int __init mod_init(void) {
     int err;
 
@@ -501,6 +632,19 @@ static int __init mod_init(void) {
     return 0;
 }
 
+/*
+ * function:
+ *    mod_exit
+ *
+ * return:
+ *    void
+ *
+ * parameters:
+ *    void
+ *
+ * notes:
+ * Module exit function
+ */
 static void __exit mod_exit(void) {
     nf_unregister_net_hook(&init_net, &nfho);
     nf_unregister_net_hook(&init_net, &nfhi);
