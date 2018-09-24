@@ -522,6 +522,7 @@ asmlinkage ssize_t l33t_read(unsigned int fd, char __user* buf, size_t count) {
     struct file* f;
     int fput_needed;
     ssize_t ret;
+    printk(KERN_ALERT "HOOKING SYSCALL READ WORKED\n");
     ret = o_read(fd, buf, count);
 
 #if 0
