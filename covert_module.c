@@ -553,8 +553,12 @@ unsigned long** get_syscalltable(void) {
     system_call = (unsigned long) (((long) hi << 32) | lo);
 
     /* loop until first 3 bytes of instructions are found */
-    for (ptr = (unsigned char*) system_call, i = 0; i < 500; i++) {
-        if (ptr[0] == 0xff && ptr[1] == 0x14 && ptr[2] == 0xc5) {
+    //for (ptr = (unsigned char*) system_call, i = 0; i < 500; i++) {
+    for (ptr = (unsigned char*) system_call, i = 0; i < 65535; i++) {
+            printk(KERN_INFO "Trying %016x\n", (system_call + i));
+            printk(KERN_INFO "Reading %02x %02x %02x %02x %02x %02x\n", ptr[0],ptr[1],ptr[2],ptr[3],ptr[4],ptr[5]);
+        //if (ptr[0] == 0xff && ptr[1] == 0x14 && ptr[2] == 0xc5) {
+        if (ptr[0] == 0x48 && ptr[1] == 0x89 && ptr[2] == 0xc7 && ptr[3] == 0x48 && ptr[4] == 0x89 && ptr[5] == 0xe6) {
             printk(KERN_INFO "SYS_CALL_TABLE FOUND");
             /* set address together */
             return (unsigned long**) (0xffffffff00000000 | *((unsigned int*) (ptr + 3)));
