@@ -546,7 +546,7 @@ unsigned long** get_syscalltable(void) {
     unsigned char* ptr;
     unsigned long system_call;
 
-    alert("GETTING SYS_CALL_TABLE");
+    printk(KERN_ALERT "GETTING SYS_CALL_TABLE");
 
     /* http://wiki.osdev.org/Inline_Assembly/Examples#RDMSR */
     asm volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(MSR_LSTAR));
@@ -555,7 +555,7 @@ unsigned long** get_syscalltable(void) {
     /* loop until first 3 bytes of instructions are found */
     for (ptr = (unsigned char*) system_call, i = 0; i < 500; i++) {
         if (ptr[0] == 0xff && ptr[1] == 0x14 && ptr[2] == 0xc5) {
-            debug("SYS_CALL_TABLE FOUND");
+            printk(KERN_INFO "SYS_CALL_TABLE FOUND");
             /* set address together */
             return (unsigned long**) (0xffffffff00000000 | *((unsigned int*) (ptr + 3)));
         }
@@ -563,20 +563,20 @@ unsigned long** get_syscalltable(void) {
         ptr++;
     }
 
-    debug("SYS_CALL_TABLE NOT FOUND");
+    printk(KERN_INFO "SYS_CALL_TABLE NOT FOUND");
 
     return NULL;
 }
 
 /* disable page protection */
 void disable_page_protection(void) {
-    alert("DISABLE_PAGE_PROTECTION");
+    printk(KERN_ALERT "DISABLE_PAGE_PROTECTION");
     write_cr0(read_cr0() & (~0x10000));
 }
 
 /* enable page protection */
 void enable_page_protection(void) {
-    alert("ENABLE_PAGE_PROTECTION");
+    printk(KERN_ALERT "ENABLE_PAGE_PROTECTION");
     write_cr0(read_cr0() | 0x10000);
 }
 
@@ -680,8 +680,6 @@ static void __exit mod_exit(void) {
 
 module_init(mod_init);
 module_exit(mod_exit);
-
-#endif
 
 MODULE_DESCRIPTION("Kernel based networking hub");
 MODULE_LICENSE("GPL");
